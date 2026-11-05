@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame, QHBox
 
 from qt_common import *  # noqa: F401,F403
 from qt_common import (_brand_arrow_path, _glow, _grad, _hl_html, _pick_family,  # noqa: F401
-                       _shadow, _tone_for, app_icon, default_export_path,
+                       _shadow, app_icon, default_export_path,
                        search_icon, settings)
 from core.fsio import atomic_write_json, atomic_write_text
 from services.catalog import CatalogService  # noqa: F401
@@ -305,7 +305,7 @@ class PackageRow(QWidget):
 
         self.tag = QLabel(self)
         self.tag.setAlignment(Qt.AlignCenter)
-        dep = pkg.category == "运行库与组件" or getattr(pkg, "isDependency", False)
+        dep = bool(getattr(pkg, "isDependency", False))
         if not self.selectable:
             self.tag.setText("不可重装")
             self.tag.setToolTip("winget 没有可用的自动重装源（如系统组件/商店应用），仅列出供参考")

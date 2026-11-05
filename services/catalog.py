@@ -1,4 +1,9 @@
-"""服务层：把 winget 的原始数据加工成前端可用的目录（去噪、分类、判定能否重装）。"""
+"""服务层：把 winget 的原始数据加工成前端可用的目录（去噪、判定能否重装）。
+
+分组只有一维：`reinstallable` 为真进「winget 可装」，为假进「winget 不支持」，
+不涉及任何关键词分类。本模块只额外标记「是不是运行库/系统组件」这一条
+与分组无关的展示信息（列表角标与统计卡用）。
+"""
 
 from __future__ import annotations
 
@@ -19,50 +24,13 @@ ID_KIND_MSIX = "msix"
 ID_KIND_REGISTRY = "registry"
 ID_KIND_WINGET = "winget"
 
-# 分类规则：命中即归类，按顺序匹配（越具体的放前面）
-CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("运行库与组件", (
-        "vcredist", "visualc++", "redistributable", "dotnet", "windowsappruntime", "vclibs",
-        "ui.xaml", "appinstaller", "directx", "webview2", ".net framework", "net framework",
-        "net.native", "desktopappruntime", "xna",
-    )),
-    ("驱动与硬件", (
-        "amd", "nvidia", "intel", "realtek", "dolby", "audio", "driver", "chipset", "radeon",
-        "graphics", "touchpad", "synaptics", "logitech", "razer",
-    )),
-    ("开发工具", (
-        "git", "python", "nodejs", "node.js", "visualstudio", "vscode", "dbeaver", "terminal",
-        "wsl", "docker", "jdk", "java", "idea", "pycharm", "curl", "notepad", "marktext",
-        "jgraph", "draw.io", "chsrc", "clink", "wingetcreate", "mysql", "postgres", "postman",
-        "navicat", "sublime", "mingw", "cmake", "gradle", "maven", "anaconda", "conda",
-        "github", "gitlab", "hBuilder", "devcpp", "keil", "vs code",
-    )),
-    ("浏览器", ("chrome", "firefox", "edge", "opera", "brave", "vivaldi", "浏览器")),
-    ("通讯与协作", (
-        "wechat", "weixin", "wecom", "企业微信", "微信", "qq", "dingtalk", "钉钉", "feishu",
-        "飞书", "workbuddy", "telegram", "discord", "slack", "zoom", "deskgo", "桌面整理",
-        "wemeet", "腾讯会议",
-    )),
-    ("网络与下载", (
-        "clash", "v2ray", "xray", "thunder", "迅雷", "download", "idm", "localsend", "uuremote",
-        "teamviewer", "anydesk", "todesk", "sunlogin", "向日葵", "proxy", "clashverge", "neat",
-        "motrix", "aria2",
-    )),
-    ("游戏", ("steam", "epic", "battle.net", "ldplayer", "雷电", "模拟器", "game", "wegame", "游戏")),
-    ("媒体与文档", (
-        "potplayer", "vlc", "pdfcraft", "pdf", "spotify", "music", "网易云", "qqmusic", "爱奇艺",
-        "bilibili", "剪映", "capcut", "obs", "photoshop", "figma", "office", "wps", "acrobat",
-        "看图", "播放器",
-    )),
-    ("安全", ("huorong", "火绒", "360", "defender", "antivirus", "安全", "杀毒", "kaspersky")),
-    ("效率与系统工具", (
-        "everything", "utools", "pixpin", "7zip", "7-zip", "winrar", "bandizip", "peazip",
-        "fileconverter", "geekuninstaller", "twinkle", "tubatools", "palminput", "input", "输入法",
-        "snipaste", "quicker", "ditto", "wox", "powertoys", "translucenttb", "rime", "搜狗",
-    )),
-]
-
-DEPENDENCY_CATEGORY = "运行库与组件"
+# 运行库/系统组件名单：只用来给列表行打「运行库」角标、给统计卡计数，
+# 不参与分组（分组只看 reinstallable）。
+DEPENDENCY_KEYWORDS: tuple[str, ...] = (
+    "vcredist", "visualc++", "redistributable", "dotnet", "windowsappruntime", "vclibs",
+    "ui.xaml", "appinstaller", "directx", "webview2", ".net framework", "net framework",
+    "net.native", "desktopappruntime", "xna",
+)
 
 
 @dataclass
@@ -74,7 +42,7 @@ class Package:
     source: str = ""
     idKind: str = ID_KIND_WINGET
     reinstallable: bool = False
-    category: str = "其他"
+    # 是不是运行库/系统组件（展示用，与分组无关）
     isDependency: bool = False
 
     def to_dict(self) -> dict:
@@ -98,13 +66,10 @@ class CatalogSnapshot:
         return data
 
 
-def _classify(raw: RawPackage) -> str:
+def _is_dependency(raw: RawPackage) -> bool:
+    """是否属于运行库/系统组件（名称或包 ID 命中即算）。"""
     haystack = f"{raw.name} {raw.package_id}".lower()
-    for category, keywords in CATEGORY_RULES:
-        for keyword in keywords:
-            if keyword in haystack:
-                return category
-    return "其他"
+    return any(keyword in haystack for keyword in DEPENDENCY_KEYWORDS)
 
 
 def _id_kind(package_id: str) -> str:
@@ -165,7 +130,6 @@ class CatalogService:
                 continue
             key = raw.package_id.lower()
             reinstallable = raw.package_id in exportable
-            category = _classify(raw)
             package = Package(
                 packageIdentifier=raw.package_id,
                 name=raw.name.strip() or raw.package_id,
@@ -174,17 +138,17 @@ class CatalogService:
                 source=raw.source,
                 idKind=_id_kind(raw.package_id),
                 reinstallable=reinstallable,
-                category=category,
-                isDependency=category == DEPENDENCY_CATEGORY,
+                isDependency=_is_dependency(raw),
             )
             # 同一 ID 可能有多行（x86/x64 组件），保留信息更全的一条
             previous = unique.get(key)
             if previous is None or (not previous.reinstallable and package.reinstallable):
                 unique[key] = package
 
+        # 可重装的排前面，组内按名称；分组本身由界面按 reinstallable 判定
         packages = sorted(
             unique.values(),
-            key=lambda p: (not p.reinstallable, p.category, p.name.lower()),
+            key=lambda p: (not p.reinstallable, p.name.lower()),
         )
         duration_ms = int((time.perf_counter() - started) * 1000)
         counts = {

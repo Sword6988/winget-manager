@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGraphicsOpaci
 
 from qt_common import *  # noqa: F401,F403
 from qt_common import (_brand_arrow_path, _glow, _grad, _hl_html,  # noqa: F401
-                       _pick_family, _shadow, _tone_for, app_icon,
+                       _pick_family, _shadow, app_icon,
                        default_export_path, search_icon,
                        set_font_family, settings)
 from qt_ui import *  # noqa: F401,F403
@@ -301,7 +301,7 @@ class MainWindow(QMainWindow):
             self._bulk.append(b)
         root.addWidget(bar_wrap)
 
-        # 分类胶囊
+        # 分组胶囊（全部 / winget 可装 / winget 不支持）
         chip_wrap = QWidget(self.shell)
         chip_wrap.setAttribute(Qt.WA_TranslucentBackground, True)
         cw = QHBoxLayout(chip_wrap)
@@ -317,7 +317,7 @@ class MainWindow(QMainWindow):
         self.chip_scroll.setWidgetResizable(True)
         self.chip_scroll.setFrameShape(QFrame.NoFrame)
         self.chip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # 分类多时允许横向滚动（此前被裁剪不可见）
+        # 组名较长时允许横向滚动（此前被裁剪不可见）
         self.chip_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.chip_scroll.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
@@ -967,8 +967,9 @@ class MainWindow(QMainWindow):
         n_re = sum(1 for p in self.packages if p.reinstallable)
         self.log_append("info",
                         f"扫描完成：共 {len(self.packages)} 个软件，其中可重装 {n_re} 个；"
-                        f"另有 {len(self.packages) - n_re} 项无法重装，统一归入「{OTHER_CAT}」分组"
-                        f"（灰显、不可勾选），排在各分类之后。")
+                        f"另有 {len(self.packages) - n_re} 项 winget 装不上，"
+                        f"统一归入「{UNSUPPORTED_GROUP}」分组"
+                        f"（灰显、不可勾选），排在各分组之后。")
         if getattr(snapshot, "exportError", ""):
             # 可重装清单拿不到时所有包都会被判成「不可重装」，必须让用户看见原因
             self.log_append("fail", f"无法获取可重装清单：{snapshot.exportError}")
@@ -983,12 +984,12 @@ class MainWindow(QMainWindow):
             self.only_btn.blockSignals(True)
             self.only_btn.setChecked(False)
             self.only_btn.blockSignals(False)
-        # 首次扫描后恢复上次的筛选分类（该分类已不存在时回落到全部）
+        # 首次扫描后恢复上次的分组筛选（该分组已不存在时回落到全部）
         cat = self._restore_cat
         self._restore_cat = None
         if cat and any(self._group_of(p) == cat for p in self.packages):
             self.active_cat = cat
-            self.log_append("info", f"已恢复上次的筛选分类「{cat}」")
+            self.log_append("info", f"已恢复上次的分组筛选「{cat}」")
         else:
             self.active_cat = None
         self._rebuild_chips()
@@ -1040,7 +1041,7 @@ class MainWindow(QMainWindow):
             QApplication.clipboard().setText("https://github.com/microsoft/winget-cli/releases")
             self._flash("下载地址已复制到剪贴板")
 
-    # ── 分类胶囊 ──
+    # ── 分组胶囊 ──
     def _rebuild_chips(self) -> None:
         while self.chips_lay.count() > 1:
             it = self.chips_lay.takeAt(0)
@@ -1053,8 +1054,8 @@ class MainWindow(QMainWindow):
             g = self._group_of(p)
             counts[g] = counts.get(g, 0) + 1
         items = [("全部", len(self.packages), None)]
-        for cat in sorted(counts, key=lambda c: (c == OTHER_CAT, -counts[c], c)):
-            items.append((cat, counts[cat], cat))
+        for group_name in sorted(counts, key=lambda c: (c == UNSUPPORTED_GROUP, c)):
+            items.append((group_name, counts[group_name], group_name))
         for text, n, cat in items:
             b = QPushButton(f"{text} {n}")
             b.setCheckable(True)
@@ -1084,8 +1085,8 @@ class MainWindow(QMainWindow):
 
     # ── 列表 ──
     def _group_of(self, pkg) -> str:
-        """分组归属：无法自动重装的软件统一并入「其他」，该组固定排在最后。"""
-        return pkg.category if pkg.reinstallable else OTHER_CAT
+        """分组归属：只看能不能被 winget 重装，「winget 不支持」固定沉底。"""
+        return REINSTALLABLE_GROUP if pkg.reinstallable else UNSUPPORTED_GROUP
 
     def _section_members(self, title: str) -> list:
         return [r for r in self.rows.values() if self._group_of(r.pkg) == title]
@@ -1167,16 +1168,16 @@ class MainWindow(QMainWindow):
             groups.setdefault(group, []).append(pkg)
         self._matched = sum(len(v) for v in groups.values())
 
-        for category in sorted(groups, key=lambda c: (c == OTHER_CAT, -len(groups[c]), c)):
-            sec = GroupSection(category, self.expanded.get(category, True), self.rows_host)
-            sec.header.select_all.connect(lambda c=category: self._toggle_group(c))
-            if category == OTHER_CAT:
+        for group_name in sorted(groups, key=lambda c: (c == UNSUPPORTED_GROUP, c)):
+            sec = GroupSection(group_name, self.expanded.get(group_name, True), self.rows_host)
+            sec.header.select_all.connect(lambda c=group_name: self._toggle_group(c))
+            if group_name == UNSUPPORTED_GROUP:
                 sec.header.title.setToolTip(
-                    f"兜底分组，固定排在最后：\n"
-                    f"· 未匹配到分类的软件\n"
-                    f"· winget 无可用安装源、无法自动重装的项（灰显，仅列出供核对）")
+                    "winget 装不上的软件都在这里：\n"
+                    "· 没有可用的安装源（MSIX/UWP、注册表安装、源里已下架等）\n"
+                    "· 灰显且不可勾选，仅作核对，不影响导出")
             # 组内先可勾选、后不可重装（灰行统一沉到底部）
-            order = sorted(groups[category],
+            order = sorted(groups[group_name],
                            key=lambda p: (not p.reinstallable, p.name.lower()))
             for pkg in order:
                 key = pkg.packageIdentifier.lower()
@@ -1195,7 +1196,7 @@ class MainWindow(QMainWindow):
             sec.prepare()
             self.sections.append(sec)
             self.rows_lay.insertWidget(self.rows_lay.count() - 1, sec)
-            self._update_section_count(category)
+            self._update_section_count(group_name)
 
         self.rows_host.setUpdatesEnabled(True)
         sb.setValue(min(pos, sb.maximum()))
@@ -1229,8 +1230,8 @@ class MainWindow(QMainWindow):
         super().moveEvent(e)
         self._track_normal_geo()
 
-    def _toggle_group(self, category: str) -> None:
-        rows = self._section_members(category)
+    def _toggle_group(self, group_name: str) -> None:
+        rows = self._section_members(group_name)
         if not rows:
             return
         sel_rows = [r for r in rows if r.selectable]
@@ -1239,7 +1240,7 @@ class MainWindow(QMainWindow):
             if r.selectable:
                 self.checked[r.pkg.packageIdentifier.lower()] = target
             r.set_checked(target)
-        self._update_section_count(category)
+        self._update_section_count(group_name)
         self._update_status()
         self._save_selection()
 
@@ -1247,16 +1248,16 @@ class MainWindow(QMainWindow):
         sel = sum(1 for r in rows if r._checked)
         sel_ok = [r for r in rows if r.selectable]
         sec.header.set_count(sel, len(rows))
-        # 整组都不可勾选（如「其他」）时不显示「全选本组」，避免点了没反应
+        # 整组都不可勾选（「winget 不支持」）时不显示「全选本组」，避免点了没反应
         sec.header.sel_all.setVisible(bool(sel_ok))
         if sel_ok:
             sec.header.sel_all.setText("全不选" if sel == len(sel_ok) else "全选本组")
 
-    def _update_section_count(self, category: str) -> None:
+    def _update_section_count(self, group_name: str) -> None:
         for sec in self.sections:
-            if sec.title != category:
+            if sec.title != group_name:
                 continue
-            rows = self._section_members(category)
+            rows = self._section_members(group_name)
             self._sync_header(sec, rows)
 
     def _update_all_counts(self) -> None:
@@ -1302,9 +1303,9 @@ class MainWindow(QMainWindow):
         kw = self.search.text().strip()
         has_filter = bool(kw or self.active_cat or self.only_selected)
         if has_filter and self._matched == 0:
-            if self.only_selected and self.active_cat == OTHER_CAT and not kw:
+            if self.only_selected and self.active_cat == UNSUPPORTED_GROUP and not kw:
                 self.empty_lbl.setText(
-                    f"「{OTHER_CAT}」里的软件都无法自动重装，本来就不可勾选\n"
+                    f"「{UNSUPPORTED_GROUP}」里的软件 winget 都装不上，本来就不可勾选\n"
                     "关闭「仅看已选」即可查看这些条目")
             elif self.only_selected and not kw and not self.active_cat:
                 self.empty_lbl.setText("还没有勾选任何软件\n取消「仅看已选」可继续浏览并勾选")
@@ -1316,7 +1317,7 @@ class MainWindow(QMainWindow):
                 self.empty_lbl.setText(f"未找到与“{kw}”匹配的软件\n"
                                        "可尝试搜索软件名或包 ID，多个词用空格分隔")
             else:
-                self.empty_lbl.setText("该分类下暂无可重装的软件")
+                self.empty_lbl.setText("该分组下暂无可重装的软件")
             self.empty_clear.setVisible(True)
             self.stack.setCurrentIndex(1)
             return
@@ -1335,7 +1336,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: self._rebuild_list(keep_scroll=True))
 
     def _scoped_packages(self) -> list:
-        """当前搜索/分类/仅看已选下的可见可勾选包；无任何筛选时返回全部。
+        """当前搜索/分组/仅看已选下的可见可勾选包；无任何筛选时返回全部。
 
         批量操作的语义是「对我正在看的这批生效」：搜了 chrome 再按 Ctrl+A，
         用户期望勾上搜出来的那些，而不是屏幕外的几百个。
@@ -1387,7 +1388,7 @@ class MainWindow(QMainWindow):
         self.stat_reinstall.set_value(str(n_re))
         self.stat_selected.set_value(str(n))
         self.stat_deps.set_value(str(sum(1 for p in self.packages
-                                         if p.category == "运行库与组件" and p.reinstallable)))
+                                         if p.isDependency and p.reinstallable)))
         if n:
             self.sel_lbl.setText(str(n))
             self.sel_lbl.setVisible(True)
@@ -1401,7 +1402,7 @@ class MainWindow(QMainWindow):
             warn = " · 可重装清单获取失败" if getattr(self.snapshot, "exportError", "") else ""
             self.sub_lbl.setText(
                 f"共 {total} 个已安装 · {n_re} 个可重装 · "
-                f"{total - n_re} 项无法重装（归入「{OTHER_CAT}」） · "
+                f"{total - n_re} 项 winget 装不上（归入「{UNSUPPORTED_GROUP}」） · "
                 f"扫描耗时 {self.snapshot.durationMs / 1000:.1f}s{warn}")
         if self.state == "SCANNING":
             return
@@ -1410,7 +1411,8 @@ class MainWindow(QMainWindow):
             self.status_lbl.setText(f"筛选出 {self._matched} / 共 {total} 项{suffix}")
         elif self.snapshot:
             self.status_lbl.setText(
-                f"{n_re} 个软件可一键重装 · {total - n_re} 项无法重装已归入「{OTHER_CAT}」"
+                f"{n_re} 个软件可一键重装 · {total - n_re} 项 winget 装不上，"
+                f"已归入「{UNSUPPORTED_GROUP}」"
                 f" · 勾选后点右下角「导出配置」")
 
     def _flash(self, text: str) -> None:

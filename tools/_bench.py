@@ -36,8 +36,8 @@ def bench():
         print(f"{label}: {dt * 1000:.1f} ms")
         return dt
 
-    t(win._rebuild_list, "全量重建列表（切分类/排序时）")
-    t(lambda: win._rebuild_chips(), "重建分类胶囊")
+    t(win._rebuild_list, "全量重建列表（切分组/搜索时）")
+    t(lambda: win._rebuild_chips(), "重建分组胶囊")
 
     win.search.setText("py")
     win._rebuild_list()
@@ -56,11 +56,11 @@ def bench():
     print(f"连续滚动 {sb.maximum() // 40} 帧: {(time.perf_counter() - t0) * 1000:.0f} ms "
           f"(每帧 {(time.perf_counter() - t0) * 1000 / max(1, sb.maximum() // 40):.1f} ms)")
 
-    # 滚动到底再展开「其他」组
+    # 滚动到底再展开「winget 不支持」组
     sb.setValue(sb.maximum())
     app.processEvents()
     other = win.sections[-1]
-    t(other.toggle, "展开「其他」39 行", 1)
+    t(other.toggle, "展开「winget 不支持」组", 1)
 
     all_widgets = len(win.findChildren(QWidget))
     print(f"控件总数: {all_widgets}")

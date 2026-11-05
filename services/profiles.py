@@ -148,6 +148,8 @@ def build_unreinstallable_list(packages: list[Package]) -> str:
     """无法自动重装的软件清单（纯文本，重装系统后照着手动装）。
 
     界面上这些行只在本次运行里可见，导出成 txt 才留得住。
+    这些包全部属于同一个分组（winget 不支持），所以按名称平铺即可，
+    不再按分类切小节。
     """
     items = [p for p in packages if not p.reinstallable]
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -155,25 +157,17 @@ def build_unreinstallable_list(packages: list[Package]) -> str:
         "Winget 软件管家 · 无法自动重装清单",
         f"导出时间：{stamp}",
         "",
-        f"共 {len(items)} 项。这些软件没有可用的 winget 安装源，",
+        f"共 {len(items)} 项。这些软件没有可用的 winget 安装源（winget 不支持），",
         "重装系统后需要手动下载安装（本清单仅供核对，不会被恢复脚本处理）。",
         "",
     ]
     if not items:
         return "\r\n".join(head + ["（没有这类软件，全部都能自动重装）"]) + "\r\n"
 
-    by_cat: dict[str, list[Package]] = {}
-    for p in items:
-        by_cat.setdefault(p.category or "未分类", []).append(p)
-
     body: list[str] = []
-    for cat in sorted(by_cat, key=lambda c: (-len(by_cat[c]), c)):
-        group = sorted(by_cat[cat], key=lambda p: p.name.lower())
-        body.append(f"【{cat}】{len(group)} 项")
-        for p in group:
-            ver = f"  v{p.version}" if p.version else ""
-            src = f"  [{p.source}]" if p.source else ""
-            body.append(f"  · {p.name}{ver}")
-            body.append(f"    {p.packageIdentifier}{src}")
-        body.append("")
+    for p in sorted(items, key=lambda p: (p.name.lower(), p.packageIdentifier.lower())):
+        ver = f"  v{p.version}" if p.version else ""
+        src = f"  [{p.source}]" if p.source else ""
+        body.append(f"  · {p.name}{ver}")
+        body.append(f"    {p.packageIdentifier}{src}")
     return "\r\n".join(head + body) + "\r\n"

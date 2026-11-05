@@ -49,26 +49,30 @@ def make_config() -> Config:
 
 
 def make_packages() -> list:
-    """三类可重装 + 一堆不可重装，覆盖「其他」兜底分组。"""
+    """可重装 12 项（含 2 个运行库）+ 8 项 winget 装不上，覆盖两个固定分组。"""
     data = [
-        ("Google.Chrome", "Google Chrome", "浏览器", True),
-        ("Mozilla.Firefox", "Mozilla Firefox", "浏览器", True),
-        ("Microsoft.Edge", "Microsoft Edge", "浏览器", True),
-        ("Git.Git", "Git", "开发工具", True),
-        ("Python.Python.3.14", "Python 3.14", "开发工具", True),
-        ("Microsoft.VisualStudioCode", "Visual Studio Code", "开发工具", True),
-        ("7zip.7zip", "7-Zip", "效率与系统工具", True),
-        ("voidtools.Everything", "Everything", "效率与系统工具", True),
-        ("Valve.Steam", "Steam", "游戏", True),
-        ("Huorong.Huorong", "火绒安全", "安全", True),
+        ("Google.Chrome", "Google Chrome", True),
+        ("Mozilla.Firefox", "Mozilla Firefox", True),
+        ("Microsoft.Edge", "Microsoft Edge", True),
+        ("Git.Git", "Git", True),
+        ("Python.Python.3.14", "Python 3.14", True),
+        ("Microsoft.VisualStudioCode", "Visual Studio Code", True),
+        ("7zip.7zip", "7-Zip", True),
+        ("voidtools.Everything", "Everything", True),
+        ("Valve.Steam", "Steam", True),
+        ("Huorong.Huorong", "火绒安全", True),
+        # 运行库：可重装，但不是「应用」，列表里要打「运行库」角标
+        ("Microsoft.VCRedist.2015+.x64", "Microsoft Visual C++ 2015-2022 x64", True),
+        ("Microsoft.DotNet.Runtime.10", "Microsoft .NET Runtime 10", True),
     ]
-    pkgs = [Package(packageIdentifier=i, name=n, category=c, reinstallable=r,
+    dep_ids = {"Microsoft.VCRedist.2015+.x64", "Microsoft.DotNet.Runtime.10"}
+    pkgs = [Package(packageIdentifier=i, name=n, reinstallable=r,
+                    isDependency=i in dep_ids,
                     version="1.0.0" if r else "", source="winget" if r else "")
-            for i, n, c, r in data]
-    # 不可重装：散落在各分类，最终都该进「其他」
+            for i, n, r in data]
+    # winget 装不上：来源五花八门，最终全部归入「winget 不支持」
     for i in range(8):
         pkgs.append(Package(packageIdentifier=f"Vendor.Tool{i}", name=f"参考组件 {i}",
-                            category=["浏览器", "开发工具", "游戏"][i % 3],
                             reinstallable=False, version="", source="msix"))
     return pkgs
 
@@ -146,29 +150,41 @@ class SmokeTest(unittest.TestCase):
 
     # ── 列表 ──
     def test_sections_built(self) -> None:
-        self.assertGreater(len(self.win.sections), 1)
+        titles = [s.title for s in self.win.sections]
+        self.assertEqual(titles, [Q.REINSTALLABLE_GROUP, Q.UNSUPPORTED_GROUP],
+                         "分组固定两组，且「winget 不支持」沉底")
         self.assertEqual(len(self.win.rows), len(self.pkgs))
-        self.assertEqual(self.win.sections[-1].title, Q.OTHER_CAT,
-                         "「其他」必须排在最后")
 
-    def test_other_group_all_grey(self) -> None:
-        other = [r for r in self.win.rows.values() if self.win._group_of(r.pkg) == Q.OTHER_CAT]
-        self.assertTrue(other)
-        for r in other:
-            self.assertFalse(r.selectable, "「其他」组内应为不可勾选的灰行")
+    def test_group_of_is_reinstallable_flag(self) -> None:
+        """分组只由 reinstallable 决定，与名称/包 ID 无关。"""
+        for p in self.pkgs:
+            expected = Q.REINSTALLABLE_GROUP if p.reinstallable else Q.UNSUPPORTED_GROUP
+            self.assertEqual(self.win._group_of(p), expected,
+                             f"{p.packageIdentifier} 的分组判定错误")
+        self.assertEqual({self.win._group_of(p) for p in self.pkgs},
+                         {Q.REINSTALLABLE_GROUP, Q.UNSUPPORTED_GROUP},
+                         "分组取值只能是这两个固定值")
+
+    def test_unsupported_group_all_grey(self) -> None:
+        unsupported = [r for r in self.win.rows.values()
+                       if self.win._group_of(r.pkg) == Q.UNSUPPORTED_GROUP]
+        self.assertTrue(unsupported)
+        for r in unsupported:
+            self.assertFalse(r.selectable, "「winget 不支持」组内应为不可勾选的灰行")
             self.assertFalse(r.pkg.reinstallable)
         self.assertFalse(self.win.sections[-1].header.sel_all.isVisible(),
                          "整组不可勾时不应显示「全选本组」")
 
     def test_group_toggle(self) -> None:
-        self.win._toggle_group("浏览器")
+        self.win._toggle_group(Q.REINSTALLABLE_GROUP)
         self.app.processEvents()
         rows = [r for r in self.win.rows.values()
-                if self.win._group_of(r.pkg) == "浏览器" and r.selectable]
-        self.assertTrue(rows)
+                if self.win._group_of(r.pkg) == Q.REINSTALLABLE_GROUP and r.selectable]
+        self.assertEqual(len(rows), sum(1 for p in self.pkgs if p.reinstallable))
         self.assertTrue(all(r._checked for r in rows), "全选本组应勾上所有可勾行")
-        self.win._toggle_group("浏览器")   # 复位
+        self.win._toggle_group(Q.REINSTALLABLE_GROUP)   # 复位
         self.app.processEvents()
+        self.assertFalse(any(r._checked for r in rows))
 
     # ── 吸顶分组头 ──
     def test_sticky_follows_scroll(self) -> None:
@@ -365,9 +381,22 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("无法自动重装清单", text)
         self.assertIn("参考组件 0", text)
         self.assertIn("Vendor.Tool0", text)
-        self.assertIn("【", text, "应按分类分组")
+        self.assertNotIn("【", text, "这些包同属「winget 不支持」，不该再按分类切小节")
         self.assertNotIn("Google Chrome", text, "可重装的包不该出现在核对清单里")
         self.assertTrue(text.startswith("Winget 软件管家"))
+        # 平铺按名称排序：参考组件 0 在 参考组件 1 之前
+        self.assertLess(text.index("参考组件 0"), text.index("参考组件 1"))
+
+    # ── 运行库角标（与分组无关的展示信息） ──
+    def test_dependency_badge_counts(self) -> None:
+        self.win._rebuild_list()        # 保证行是完整列表（不被前面用例的筛选影响）
+        self.win._update_status()
+        deps = [p for p in self.pkgs if p.isDependency and p.reinstallable]
+        self.assertEqual(self.win.stat_deps._value, str(len(deps)),
+                         "「运行库」统计卡应只数可重装的运行库")
+        row = next(r for r in self.win.rows.values()
+                   if r.pkg.packageIdentifier == "Microsoft.VCRedist.2015+.x64")
+        self.assertEqual(row.tag.text(), "运行库")
 
     # ── 关于 ──
     def test_about_dialog_builds(self) -> None:
@@ -413,6 +442,35 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(snap.counts["reinstallable"], 0, "拿不到清单时没有包可判为可重装")
         self.assertEqual(snap.wingetVersion, "1.10.0", "版本号应由 ScanWorker 传入")
         self.assertTrue(snap.packages, "包本身仍应被列出")
+
+    # ── 目录服务：分组只依赖 reinstallable，不再有 category ──
+    def test_catalog_snapshot_two_groups(self) -> None:
+        class FakeRepo:
+            def list_installed(self, cancel=None):
+                return SimpleNamespace(
+                    ok=True, returncode=0, stderr="",
+                    stdout="名称            ID                            版本\n"
+                           "Google Chrome   Google.Chrome                 1.0\n"
+                           "VC++ 运行库     Microsoft.VCRedist.2015+.x64  14.0\n"
+                           "商店应用        Microsoft.WindowsStore        2.0\n")
+
+            def export_ids(self, cancel=None):
+                return {"Google.Chrome", "Microsoft.VCRedist.2015+.x64"}, None
+
+        snap = CatalogService(make_config(), FakeRepo()).get_catalog(force=True)
+        by_id = {p.packageIdentifier: p for p in snap.packages}
+        self.assertEqual(len(by_id), 3)
+        self.assertTrue(by_id["Google.Chrome"].reinstallable)
+        self.assertTrue(by_id["Microsoft.VCRedist.2015+.x64"].isDependency,
+                        "运行库应被标出来（列表角标用），但与分组无关")
+        self.assertFalse(by_id["Microsoft.WindowsStore"].reinstallable)
+        self.assertFalse(hasattr(by_id["Google.Chrome"], "category"),
+                         "Package 不应再有 category 字段")
+        self.assertEqual(snap.counts["reinstallable"], 2)
+        self.assertEqual(snap.counts["unsupported"], 1)
+        self.assertEqual(snap.counts["dependencies"], 1)
+        self.assertEqual([p.reinstallable for p in snap.packages], [True, True, False],
+                         "可重装的排前面，装不上的沉底")
 
     # ── 缓存命中不再重复构建 ──
     def test_catalog_cache_avoids_second_build(self) -> None:

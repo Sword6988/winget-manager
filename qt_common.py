@@ -6,7 +6,7 @@
   · 靛蓝 → 紫罗兰渐变 #6366F1 → #8B5CF6
   · 淡紫底色 #F4F5FA + 双径向光晕
   · 卡片 16px 圆角 + 柔和投影，玻璃拟态工具条/底栏
-  · 统计卡（顶部渐变条 + 渐变数字）、分类胶囊（选中渐变）
+  · 统计卡（顶部渐变条 + 渐变数字）、分组胶囊（选中渐变）
   · 无边框窗口 + 自绘标题栏 + 圆角窗口
 业务逻辑复用 core/ services/，未改动后端。
 """
@@ -157,17 +157,10 @@ def set_font_family(family: str) -> None:
 
 FONT_FAMILY = "HarmonyOS Sans SC"
 MONO_FAMILY = "Consolas"
-OTHER_CAT = "其他"                 # 兜底分组：未分类 + 无法自动重装的软件，固定排最后
 
-CAT_TONES = [
-    ("#6366F1", "#8B5CF6"), ("#3B82F6", "#06B6D4"), ("#10B981", "#14B8A6"),
-    ("#F59E0B", "#F97316"), ("#EC4899", "#F43F5E"), ("#8B5CF6", "#A855F7"),
-    ("#0EA5E9", "#6366F1"), ("#64748B", "#94A3B8"),
-]
-
-
-def _tone_for(category: str) -> tuple:
-    return CAT_TONES[sum(ord(c) for c in category) % len(CAT_TONES)]
+# 软件列表固定两组，判定只看 reinstallable，不做任何关键词分类
+REINSTALLABLE_GROUP = "winget 可装"      # 分组一：winget 有安装源，可勾选导出
+UNSUPPORTED_GROUP = "winget 不支持"      # 分组二：winget 装不上，灰显仅作核对，固定沉底
 
 
 HL_BG = "#FDE68A"
