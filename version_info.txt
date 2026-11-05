@@ -3,8 +3,8 @@
 # 本文件由 tools/gen_version_info.py 生成，改版本号请改 core/version.py 后重跑脚本。
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 14, 0, 0),
-    prodvers=(2, 14, 0, 0),
+    filevers=(2, 15, 0, 0),
+    prodvers=(2, 15, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -19,12 +19,12 @@ VSVersionInfo(
         u'080404B0',
         [StringStruct(u'CompanyName', u'Shibeng'),
         StringStruct(u'FileDescription', u'Winget 软件管家 - 已装软件清点与重装清单导出'),
-        StringStruct(u'FileVersion', u'2.14.0.0'),
+        StringStruct(u'FileVersion', u'2.15.0.0'),
         StringStruct(u'InternalName', u'WingetSoftwareManagerQt'),
         StringStruct(u'LegalCopyright', u'Copyright (C) 2026 Shibeng'),
         StringStruct(u'OriginalFilename', u'WingetManager.exe'),
         StringStruct(u'ProductName', u'Winget 软件管家'),
-        StringStruct(u'ProductVersion', u'2.14.0.0')])
+        StringStruct(u'ProductVersion', u'2.15.0.0')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
   ]
