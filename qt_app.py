@@ -38,7 +38,7 @@ from qt_common import (_brand_arrow_path, _glow, _grad, _hl_html,  # noqa: F401
 from qt_ui import *  # noqa: F401,F403
 from qt_ui import AboutDialog, ClickableLabel, ExportDialog, GradientLabel, PackageRow  # noqa: F401
 from core.config import load_config  # noqa: E402
-from core.errors import ScanCancelled  # noqa: E402
+from core.errors import ScanCancelled, WingetNotFound  # noqa: E402
 from core.fsio import atomic_write_json  # noqa: E402
 from services.profiles import build_winget_manifest  # noqa: E402
 from services.winget_cli import WingetRepository  # noqa: E402
@@ -70,17 +70,23 @@ class ScanWorker(QThread):
         try:
             ver = ""
             if self._repo is not None and not self._cancel.is_set():
-                # 前置探测：winget 不在时直接给引导，而不是丢一条晦涩的错误
+                # 前置探测：只有「真的找不到 winget 可执行文件」才给安装引导。
+                # 拿不到版本号不能当成没装——`winget --version` 与别的 winget 实例
+                # 并发时可能空输出退出（实测 4/10），软件其实好好装着；
+                # 这时按 "unknown" 继续扫描，manifest 的 WinGetVersion 字段本来就有兜底。
                 try:
                     ver = self._repo.version(cancel=self._cancel)
                 except ScanCancelled:
                     return             # 用户取消，静默退出（不是错误）
-                except Exception as exc:  # noqa: BLE001
+                except WingetNotFound as exc:
                     self.missing.emit(str(exc) or "无法启动 winget 进程")
                     return
-                if not ver or ver == "unknown":
-                    self.missing.emit("winget --version 无输出（未安装或不在 PATH）")
-                    return
+                except Exception as exc:  # noqa: BLE001
+                    # 探测本身出错（超时等）也不该拦着扫描：后面 list 会给出真实结论
+                    logging.getLogger("scan").warning("winget 版本探测失败，按 unknown 继续: %s", exc)
+                    ver = "unknown"
+                if not ver:
+                    ver = "unknown"
             if self._cancel.is_set():
                 return
             snap = self._catalog.get_catalog(force=True, cancel=self._cancel,
@@ -972,11 +978,6 @@ class MainWindow(QMainWindow):
                         f"另有 {len(self.packages) - n_re} 项 winget 装不上，"
                         f"统一归入「{UNSUPPORTED_GROUP}」分组"
                         f"（灰显、不可勾选），排在最后。")
-        if getattr(snapshot, "exportError", ""):
-            # 可重装清单拿不到时所有包都会被判成「不可重装」，必须让用户看见原因
-            self.log_append("fail", f"无法获取可重装清单：{snapshot.exportError}")
-            self.log_append("skip",
-                            "可稍后重新扫描；本次所有软件按不可自动重装处理（勾选与导出会受影响）。")
         valid = {p.packageIdentifier.lower() for p in self.packages if p.reinstallable}
         for k in [k for k in self.checked if k not in valid]:
             del self.checked[k]
@@ -1300,19 +1301,6 @@ class MainWindow(QMainWindow):
                 self.empty_clear.setVisible(False)
                 self.stack.setCurrentIndex(1)
             return
-        # 可重装清单没取到 → 整屏都是灰行，用户只会以为「软件都不支持」。
-        # 这里给一条能动手的提示，而不是让他对着一屏灰条发愁。
-        snap = self.snapshot
-        if (self.state == "READY" and snap is not None and getattr(snap, "exportError", "")
-                and not any(p.reinstallable for p in self.packages)):
-            reason = (snap.exportError.splitlines() or [""])[0][:160]
-            self.empty_lbl.setText(
-                "没能获取「可重装清单」，所有软件暂时都显示为不可自动重装\n"
-                f"原因：{reason}\n"
-                "点「重新扫描」重试；仍失败请先确认 winget 能正常执行 winget list")
-            self.empty_clear.setVisible(False)
-            self.stack.setCurrentIndex(1)
-            return
         kw = self.search.text().strip()
         has_filter = bool(kw or self.active_cat or self.only_selected)
         if has_filter and self._matched == 0:
@@ -1412,12 +1400,11 @@ class MainWindow(QMainWindow):
             self.sel_suffix.setVisible(False)
         self.export_btn.setEnabled(self.state in ("SCANNING", "SCAN_FAILED", "READY") and n > 0)
         if self.snapshot:
-            warn = " · 可重装清单获取失败" if getattr(self.snapshot, "exportError", "") else ""
             self.sub_lbl.setText(
                 f"共 {total} 个已安装 · {n_re} 项可重装"
                 f"（{SOFTWARE_GROUP} {n_re - n_dep} / {DEPENDENCY_GROUP} {n_dep}） · "
                 f"{total - n_re} 项 winget 装不上（归入「{UNSUPPORTED_GROUP}」） · "
-                f"扫描耗时 {self.snapshot.durationMs / 1000:.1f}s{warn}")
+                f"扫描耗时 {self.snapshot.durationMs / 1000:.1f}s")
         if self.state == "SCANNING":
             return
         if self.search.text().strip() or self.active_cat or self.only_selected:

@@ -25,6 +25,11 @@ ID_KIND_MSIX = "msix"
 ID_KIND_REGISTRY = "registry"
 ID_KIND_WINGET = "winget"
 
+# 「源」列里出现这些值，就说明 winget 有安装源、能重装。
+# `winget list` 的源列与 `winget export` 的纳入标准是同一判定的两种投影
+# （本机 99 个唯一 ID 双向比对 0 漏判 0 多判），所以不再额外跑一趟 export。
+REINSTALLABLE_SOURCES = frozenset({"winget", "msstore"})
+
 # 运行库/系统组件名单：只用来给列表行打「运行库」角标、给统计卡计数，
 # 不参与分组（分组只看 reinstallable）。
 DEPENDENCY_KEYWORDS: tuple[str, ...] = (
@@ -58,13 +63,19 @@ class CatalogSnapshot:
     machine: dict
     counts: dict
     packages: list[Package] = field(default_factory=list)
-    # 可重装清单（winget export）没取到时的可读原因；空串表示正常
-    exportError: str = ""
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["packages"] = [p.to_dict() for p in self.packages]
         return data
+
+
+def _is_reinstallable(raw: RawPackage) -> bool:
+    """能不能被 winget 重装：只看 `winget list` 的「源」列。
+
+    源列为空 = 注册表安装 / MSIX 商店桥 / 源里已下架的包，winget 装不回去。
+    """
+    return raw.source.strip().lower() in REINSTALLABLE_SOURCES
 
 
 def _is_dependency(raw: RawPackage) -> bool:
@@ -123,14 +134,12 @@ class CatalogService:
         if cancel is not None and cancel.is_set():
             raise ScanCancelled("扫描已取消")
         raw_packages = parse_list_output(list_result.stdout)
-        exportable, export_error = self._repo.export_ids(cancel=cancel)
 
         unique: dict[str, Package] = {}
         for raw in raw_packages:
             if not raw.package_id:
                 continue
             key = raw.package_id.lower()
-            reinstallable = raw.package_id in exportable
             package = Package(
                 packageIdentifier=raw.package_id,
                 name=raw.name.strip() or raw.package_id,
@@ -138,7 +147,7 @@ class CatalogService:
                 availableVersion=raw.available,
                 source=raw.source,
                 idKind=_id_kind(raw.package_id),
-                reinstallable=reinstallable,
+                reinstallable=_is_reinstallable(raw),
                 isDependency=_is_dependency(raw),
             )
             # 同一 ID 可能有多行（x86/x64 组件），保留信息更全的一条
@@ -169,7 +178,6 @@ class CatalogService:
             },
             counts=counts,
             packages=packages,
-            exportError=export_error or "",
         )
         logger.info(
             "目录刷新完成: %s 项（可重装 %s）%sms",

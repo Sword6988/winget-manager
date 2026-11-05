@@ -33,14 +33,37 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import qt_app as Q  # noqa: E402
 from core.config import Config, ConfigError, load_config  # noqa: E402
-from core.errors import BadRequest, ScanCancelled  # noqa: E402
+from core.errors import BadRequest, ScanCancelled, WingetNotFound  # noqa: E402
 from core.fsio import atomic_write_json  # noqa: E402
-from services.catalog import CatalogService, CatalogSnapshot, Package  # noqa: E402
+from services.catalog import (CatalogService, CatalogSnapshot, Package,  # noqa: E402
+                              RawPackage, _is_reinstallable)
 from services.profiles import build_restore_bat, build_winget_manifest  # noqa: E402
 from services.winget_cli import WingetRepository, _decode  # noqa: E402
 
 # 真实的 _start_scan（setUpClass 打桩前保存），放在模块级才不会被描述符绑成方法
 _ORIG_START_SCAN = None
+
+# winget 进程级全局互斥冲突时的退出码
+_MUTEX_RC = 0x8A150001
+
+
+class _FakeProc:
+    """假子进程：run() 只用到 communicate / poll / kill / returncode。"""
+
+    def __init__(self, returncode: int, out: bytes = b"", err: bytes = b"") -> None:
+        self.returncode = returncode
+        self._out = out
+        self._err = err
+        self.killed = False
+
+    def communicate(self, timeout: float | None = None):
+        return self._out, self._err
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
 
 
 def make_config() -> Config:
@@ -153,7 +176,7 @@ class SmokeTest(unittest.TestCase):
         """按给定包集合造一个 READY 窗口（不自动扫描、勾选文件在临时目录）。"""
         win = self._spawn_window()
         win.packages = list(packages)
-        win.snapshot = SimpleNamespace(durationMs=1, exportError="")
+        win.snapshot = SimpleNamespace(durationMs=1)
         win.state = "READY"
         win._rebuild_chips()
         win._rebuild_list()
@@ -246,21 +269,34 @@ class SmokeTest(unittest.TestCase):
 
     # ── 吸顶分组头 ──
     def test_sticky_follows_scroll(self) -> None:
-        sb = self.win.scroll.verticalScrollBar()
-        sb.setValue(0)
-        self.app.processEvents()
-        self.assertFalse(self.win.sticky.isVisible(), "顶部时不应出现吸顶头")
+        """专用窗口：列表在 show() 之前构建好，几何才是真实高度。
 
-        if len(self.win.sections) < 2 or sb.maximum() <= 0:
-            self.skipTest("内容不足一屏，无法验证滚动")
-        second = self.win.sections[1]
-        y = second.mapTo(self.win.rows_host, QPoint(0, 0)).y()
-        sb.setValue(min(y + 20, sb.maximum()))
-        self.app.processEvents()
-        if sb.value() <= 20:
-            self.skipTest("窗口过小，滚不到第二组")
-        self.assertTrue(self.win.sticky.isVisible(), "滚过组头后应出现吸顶头")
-        self.assertEqual(self.win.sticky._title, second.title)
+        共用 self.win 会被前面用例的「裸重建」（无事件循环）污染：小节内容高度
+        在未 polish 时测得偏小，clip 被冻结成几十像素，滚动条最大值为 0，
+        这条用例就会误判成「内容不足一屏」。真实交互里重建发生在事件循环内，
+        几何计算是正确的，用干净窗口才能测到真实行为。
+        """
+        win = self._window_with(self.pkgs)
+        try:
+            win.show()
+            self.app.processEvents()
+            sb = win.scroll.verticalScrollBar()
+            sb.setValue(0)
+            self.app.processEvents()
+            self.assertFalse(win.sticky.isVisible(), "顶部时不应出现吸顶头")
+
+            if len(win.sections) < 2 or sb.maximum() <= 0:
+                self.skipTest("内容不足一屏，无法验证滚动")
+            second = win.sections[1]
+            y = second.mapTo(win.rows_host, QPoint(0, 0)).y()
+            sb.setValue(min(y + 20, sb.maximum()))
+            self.app.processEvents()
+            if sb.value() <= 20:
+                self.skipTest("窗口过小，滚不到第二组")
+            self.assertTrue(win.sticky.isVisible(), "滚过组头后应出现吸顶头")
+            self.assertEqual(win.sticky._title, second.title)
+        finally:
+            self._drop_window(win)
 
     # ── 导出侧：恢复脚本 ──
     def test_restore_bat(self) -> None:
@@ -482,53 +518,145 @@ class SmokeTest(unittest.TestCase):
         finally:
             timer.cancel()
 
-    # ── 导出探测失败要可见 ──
-    def test_catalog_export_failure_sets_error(self) -> None:
-        class FakeRepo:
-            def list_installed(self, cancel=None):
-                return SimpleNamespace(ok=True, returncode=0,
-                                       stdout="名称      ID         版本\n"
-                                              "Git       Git.Git    2.0\n",
-                                       stderr="")
-
-            def export_ids(self, cancel=None):
-                return set(), "源不可用"
-
-        svc = CatalogService(make_config(), FakeRepo())
-        snap = svc.get_catalog(force=True, winget_version="1.10.0")
-        self.assertEqual(snap.exportError, "源不可用")
-        self.assertEqual(snap.counts["reinstallable"], 0, "拿不到清单时没有包可判为可重装")
-        self.assertEqual(snap.wingetVersion, "1.10.0", "版本号应由 ScanWorker 传入")
-        self.assertTrue(snap.packages, "包本身仍应被列出")
-
     # ── 目录服务：分组只依赖 reinstallable，不再有 category ──
-    def test_catalog_snapshot_two_groups(self) -> None:
+    def test_catalog_snapshot_three_groups(self) -> None:
+        """可装与否只看「源」列：winget / msstore 可装，空源（注册表/MSIX）不可装。"""
         class FakeRepo:
             def list_installed(self, cancel=None):
                 return SimpleNamespace(
                     ok=True, returncode=0, stderr="",
-                    stdout="名称            ID                            版本\n"
-                           "Google Chrome   Google.Chrome                 1.0\n"
-                           "VC++ 运行库     Microsoft.VCRedist.2015+.x64  14.0\n"
-                           "商店应用        Microsoft.WindowsStore        2.0\n")
-
-            def export_ids(self, cancel=None):
-                return {"Google.Chrome", "Microsoft.VCRedist.2015+.x64"}, None
+                    stdout="名称            ID                            版本     源\n"
+                           "Google Chrome   Google.Chrome                 1.0      winget\n"
+                           "VC++ 运行库     Microsoft.VCRedist.2015+.x64  14.0     winget\n"
+                           "商店应用        Microsoft.WindowsStore        2.0      msstore\n"
+                           "注册表项        Vendor.Registry.Tool          3.0\n")
 
         snap = CatalogService(make_config(), FakeRepo()).get_catalog(force=True)
         by_id = {p.packageIdentifier: p for p in snap.packages}
-        self.assertEqual(len(by_id), 3)
+        self.assertEqual(len(by_id), 4)
         self.assertTrue(by_id["Google.Chrome"].reinstallable)
+        self.assertTrue(by_id["Microsoft.WindowsStore"].reinstallable, "msstore 源也能重装")
         self.assertTrue(by_id["Microsoft.VCRedist.2015+.x64"].isDependency,
                         "运行库应被标出来（列表角标用），但与分组无关")
-        self.assertFalse(by_id["Microsoft.WindowsStore"].reinstallable)
+        self.assertFalse(by_id["Vendor.Registry.Tool"].reinstallable, "空源应判为不可重装")
         self.assertFalse(hasattr(by_id["Google.Chrome"], "category"),
                          "Package 不应再有 category 字段")
-        self.assertEqual(snap.counts["reinstallable"], 2)
+        self.assertEqual(snap.counts["reinstallable"], 3)
         self.assertEqual(snap.counts["unsupported"], 1)
         self.assertEqual(snap.counts["dependencies"], 1)
-        self.assertEqual([p.reinstallable for p in snap.packages], [True, True, False],
+        self.assertEqual([p.reinstallable for p in snap.packages], [True, True, True, False],
                          "可重装的排前面，装不上的沉底")
+
+    def test_reinstallable_from_source_column(self) -> None:
+        """源列判定要吃掉大小写与前后空格，且只认 winget / msstore。"""
+        cases = {
+            "winget": True, "WINGET": True, "  winget  ": True, "\tWinget\n": True,
+            "msstore": True, "MSStore": True, " msstore ": True,
+            "": False, "   ": False, "registry": False, "msix": False, "wingetx": False,
+        }
+        for source, expected in cases.items():
+            raw = RawPackage(name="x", package_id="Vendor.App", version="1.0", source=source)
+            self.assertEqual(_is_reinstallable(raw), expected, f"源={source!r} 判定错误")
+
+    # ── 互斥重试 ──
+    def test_run_retries_after_mutex_conflict(self) -> None:
+        """第一次撞 0x8A150001（空输出），退避后第二次成功。"""
+        procs = [_FakeProc(_MUTEX_RC), _FakeProc(0, b"v1.30.100\n")]
+
+        class Repo(WingetRepository):
+            """直接构造，绕过 find_winget 探测。"""
+
+            def __init__(self) -> None:
+                super().__init__(Config(winget_exe="winget.exe", cache_ttl=60,
+                                        command_timeout=30, extra={}))
+
+        repo = Repo()
+        with mock.patch("subprocess.Popen", side_effect=procs) as popen, \
+                mock.patch("services.winget_cli._MUTEX_BACKOFF_S", 0.01):
+            result = repo.run(["--version"])
+
+        self.assertEqual(popen.call_count, 2, "撞互斥后应重试一次")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("1.30.100", result.stdout)
+
+    def test_run_gives_up_after_max_retries(self) -> None:
+        """连续撞互斥：跑满 1 + 2 次即止，不无限重试。"""
+        procs = [_FakeProc(_MUTEX_RC) for _ in range(3)]
+
+        class Repo(WingetRepository):
+            def __init__(self) -> None:
+                super().__init__(Config(winget_exe="winget.exe", cache_ttl=60,
+                                        command_timeout=30, extra={}))
+
+        repo = Repo()
+        with mock.patch("subprocess.Popen", side_effect=procs) as popen, \
+                mock.patch("services.winget_cli._MUTEX_BACKOFF_S", 0.01):
+            result = repo.run(["list"])
+
+        self.assertEqual(popen.call_count, 3, "初次 + 2 次重试")
+        self.assertEqual(result.returncode, _MUTEX_RC)
+        self.assertFalse(result.ok)
+
+    def test_run_cancel_during_backoff(self) -> None:
+        """退避等待期间点取消要立刻抛 ScanCancelled，不能等退避跑完。"""
+        cancel = threading.Event()
+        cancel.set()
+
+        class Repo(WingetRepository):
+            def __init__(self) -> None:
+                super().__init__(Config(winget_exe="winget.exe", cache_ttl=60,
+                                        command_timeout=30, extra={}))
+
+        repo = Repo()
+        with mock.patch("subprocess.Popen", return_value=_FakeProc(_MUTEX_RC)), \
+                mock.patch("services.winget_cli._MUTEX_BACKOFF_S", 5.0):
+            started = time.perf_counter()
+            with self.assertRaises(ScanCancelled):
+                repo.run(["list"], cancel=cancel)
+            self.assertLess(time.perf_counter() - started, 1.0, "取消应立刻返回")
+
+    # ── 版本号拿不到不该当成「没装 winget」 ──
+    def test_scan_worker_continues_when_version_unknown(self) -> None:
+        class FakeRepo:
+            def version(self, cancel=None):
+                return "unknown"
+
+        class FakeCatalog:
+            def get_catalog(self, force=False, cancel=None, winget_version=""):
+                self.seen_version = winget_version
+                return SimpleNamespace(packages=[], counts={"total": 0}, durationMs=1,
+                                       generatedAt="x", wingetVersion=winget_version,
+                                       machine={})
+
+        catalog = FakeCatalog()
+        worker = Q.ScanWorker(catalog, FakeRepo())
+        seen = {"ok": 0, "missing": 0, "err": 0}
+        worker.ok.connect(lambda _s: seen.__setitem__("ok", seen["ok"] + 1))
+        worker.missing.connect(lambda _m: seen.__setitem__("missing", seen["missing"] + 1))
+        worker.err.connect(lambda _e: seen.__setitem__("err", seen["err"] + 1))
+        worker.run()                    # 同步跑：不需要事件循环，信号是同线程直连
+
+        self.assertEqual(seen["missing"], 0, "拿不到版本号不能弹「未安装 winget」")
+        self.assertEqual(seen["ok"], 1, "应继续完成扫描")
+        self.assertEqual(catalog.seen_version, "unknown", "unknown 应原样传给快照兜底")
+
+    def test_scan_worker_missing_only_on_not_found(self) -> None:
+        class NotFoundRepo:
+            def version(self, cancel=None):
+                raise WingetNotFound("未找到 winget.exe")
+
+        class BoomCatalog:
+            def get_catalog(self, **kwargs):
+                raise AssertionError("找不到 winget 时不该继续扫描")
+
+        worker = Q.ScanWorker(BoomCatalog(), NotFoundRepo())
+        seen = {"ok": 0, "missing": 0}
+        worker.ok.connect(lambda _s: seen.__setitem__("ok", seen["ok"] + 1))
+        worker.missing.connect(lambda _m: seen.__setitem__("missing", seen["missing"] + 1))
+        worker.run()
+
+        self.assertEqual(seen["missing"], 1, "WingetNotFound 才走安装引导")
+        self.assertEqual(seen["ok"], 0)
 
     # ── 缓存命中不再重复构建 ──
     def test_catalog_cache_avoids_second_build(self) -> None:
@@ -539,14 +667,10 @@ class SmokeTest(unittest.TestCase):
                 calls.append("list")
                 return SimpleNamespace(ok=True, returncode=0, stdout="", stderr="")
 
-            def export_ids(self, cancel=None):
-                calls.append("export")
-                return set(), None
-
         svc = CatalogService(make_config(), FakeRepo())     # cache_ttl=60
         first = svc.get_catalog(winget_version="1.0")
         second = svc.get_catalog(winget_version="1.0")
-        self.assertEqual(calls, ["list", "export"],
+        self.assertEqual(calls, ["list"],
                          "第二次应命中缓存，不能再跑一遍 winget")
         self.assertIs(first, second, "命中缓存应返回同一份快照对象")
 
