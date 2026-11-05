@@ -149,21 +149,55 @@ class SmokeTest(unittest.TestCase):
                 self.assertNotIn(p.packageIdentifier, ids, "不可重装的包不应进导出清单")
 
     # ── 列表 ──
+    def _window_with(self, packages: list):
+        """按给定包集合造一个 READY 窗口（不自动扫描、勾选文件在临时目录）。"""
+        win = self._spawn_window()
+        win.packages = list(packages)
+        win.snapshot = SimpleNamespace(durationMs=1, exportError="")
+        win.state = "READY"
+        win._rebuild_chips()
+        win._rebuild_list()
+        return win
+
     def test_sections_built(self) -> None:
         titles = [s.title for s in self.win.sections]
-        self.assertEqual(titles, [Q.REINSTALLABLE_GROUP, Q.UNSUPPORTED_GROUP],
-                         "分组固定两组，且「winget 不支持」沉底")
+        self.assertEqual(titles,
+                         [Q.SOFTWARE_GROUP, Q.DEPENDENCY_GROUP, Q.UNSUPPORTED_GROUP],
+                         "三组固定顺序：软件 → 运行库 → winget 不支持（沉底）")
         self.assertEqual(len(self.win.rows), len(self.pkgs))
 
-    def test_group_of_is_reinstallable_flag(self) -> None:
-        """分组只由 reinstallable 决定，与名称/包 ID 无关。"""
+    def test_sections_skip_empty_groups(self) -> None:
+        """某一组没有成员时，那一组的组头不出现。"""
+        win = self._window_with([p for p in self.pkgs if not p.isDependency])
+        try:
+            self.assertEqual([s.title for s in win.sections],
+                             [Q.SOFTWARE_GROUP, Q.UNSUPPORTED_GROUP],
+                             "没有运行库时不留空的「运行库」组头")
+        finally:
+            self._drop_window(win)
+
+        only_apps = [p for p in self.pkgs if p.reinstallable and not p.isDependency]
+        win = self._window_with(only_apps)
+        try:
+            self.assertEqual([s.title for s in win.sections], [Q.SOFTWARE_GROUP],
+                             "全部可重装且无运行库时只剩「软件」一组")
+        finally:
+            self._drop_window(win)
+
+    def test_group_of_three_way(self) -> None:
+        """分组只由 reinstallable + isDependency 决定，与名称/包 ID 无关。"""
         for p in self.pkgs:
-            expected = Q.REINSTALLABLE_GROUP if p.reinstallable else Q.UNSUPPORTED_GROUP
+            if not p.reinstallable:
+                expected = Q.UNSUPPORTED_GROUP
+            elif p.isDependency:
+                expected = Q.DEPENDENCY_GROUP
+            else:
+                expected = Q.SOFTWARE_GROUP
             self.assertEqual(self.win._group_of(p), expected,
                              f"{p.packageIdentifier} 的分组判定错误")
         self.assertEqual({self.win._group_of(p) for p in self.pkgs},
-                         {Q.REINSTALLABLE_GROUP, Q.UNSUPPORTED_GROUP},
-                         "分组取值只能是这两个固定值")
+                         {Q.SOFTWARE_GROUP, Q.DEPENDENCY_GROUP, Q.UNSUPPORTED_GROUP},
+                         "三组取值都要出现：软件 / 运行库 / winget 不支持")
 
     def test_unsupported_group_all_grey(self) -> None:
         unsupported = [r for r in self.win.rows.values()
@@ -172,17 +206,41 @@ class SmokeTest(unittest.TestCase):
         for r in unsupported:
             self.assertFalse(r.selectable, "「winget 不支持」组内应为不可勾选的灰行")
             self.assertFalse(r.pkg.reinstallable)
-        self.assertFalse(self.win.sections[-1].header.sel_all.isVisible(),
-                         "整组不可勾时不应显示「全选本组」")
+        self.assertTrue(self.win.sections[-1].header.sel_all.isHidden(),
+                        "整组不可勾时不应显示「全选本组」")
 
     def test_group_toggle(self) -> None:
-        self.win._toggle_group(Q.REINSTALLABLE_GROUP)
+        self.win._toggle_group(Q.SOFTWARE_GROUP)
         self.app.processEvents()
         rows = [r for r in self.win.rows.values()
-                if self.win._group_of(r.pkg) == Q.REINSTALLABLE_GROUP and r.selectable]
-        self.assertEqual(len(rows), sum(1 for p in self.pkgs if p.reinstallable))
+                if self.win._group_of(r.pkg) == Q.SOFTWARE_GROUP and r.selectable]
+        self.assertEqual(len(rows), sum(1 for p in self.pkgs
+                                        if p.reinstallable and not p.isDependency))
         self.assertTrue(all(r._checked for r in rows), "全选本组应勾上所有可勾行")
-        self.win._toggle_group(Q.REINSTALLABLE_GROUP)   # 复位
+        # 「运行库」组的行不受影响
+        deps = [r for r in self.win.rows.values()
+                if self.win._group_of(r.pkg) == Q.DEPENDENCY_GROUP]
+        self.assertFalse(any(r._checked for r in deps), "全选「软件」不应波及「运行库」")
+        self.win._toggle_group(Q.SOFTWARE_GROUP)   # 复位
+        self.app.processEvents()
+        self.assertFalse(any(r._checked for r in rows))
+
+    def test_dependency_group_select_all(self) -> None:
+        """运行库组内的行可勾选，组头必须出现「全选本组」。"""
+        self.app.processEvents()        # 上一条用例刚重建过列表，等新小节显形
+        sec = next(s for s in self.win.sections if s.title == Q.DEPENDENCY_GROUP)
+        self.assertFalse(sec.header.sel_all.isHidden(), "「运行库」组应能整组勾选")
+        self.assertTrue(sec.header.sel_all.isVisible(), "「运行库」组应能整组勾选")
+        rows = [r for r in self.win.rows.values()
+                if self.win._group_of(r.pkg) == Q.DEPENDENCY_GROUP]
+        self.assertTrue(rows)
+        self.assertTrue(all(r.selectable for r in rows), "运行库行可勾选")
+
+        self.win._toggle_group(Q.DEPENDENCY_GROUP)
+        self.app.processEvents()
+        self.assertTrue(all(r._checked for r in rows), "全选本组应勾上运行库")
+        self.assertEqual(sec.header.sel_all.text(), "全不选")
+        self.win._toggle_group(Q.DEPENDENCY_GROUP)      # 复位
         self.app.processEvents()
         self.assertFalse(any(r._checked for r in rows))
 

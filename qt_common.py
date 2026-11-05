@@ -158,9 +158,17 @@ def set_font_family(family: str) -> None:
 FONT_FAMILY = "HarmonyOS Sans SC"
 MONO_FAMILY = "Consolas"
 
-# 软件列表固定两组，判定只看 reinstallable，不做任何关键词分类
-REINSTALLABLE_GROUP = "winget 可装"      # 分组一：winget 有安装源，可勾选导出
-UNSUPPORTED_GROUP = "winget 不支持"      # 分组二：winget 装不上，灰显仅作核对，固定沉底
+# 软件列表固定三组，判定只看 reinstallable + isDependency，不做任何关键词分类
+SOFTWARE_GROUP = "软件"              # 分组一：winget 可装的普通软件，可勾选导出
+DEPENDENCY_GROUP = "运行库"          # 分组二：winget 可装的运行库/系统组件，同样可勾选
+UNSUPPORTED_GROUP = "winget 不支持"  # 分组三：winget 装不上，灰显仅作核对，固定垫底
+# 展示顺序以本元组为准（分组胶囊、列表小节、吸顶头都按它排）
+GROUP_ORDER: tuple[str, ...] = (SOFTWARE_GROUP, DEPENDENCY_GROUP, UNSUPPORTED_GROUP)
+
+
+def group_rank(name: str) -> int:
+    """分组的展示序号；未知分组排到最后，不让排序抛异常把界面打崩。"""
+    return GROUP_ORDER.index(name) if name in GROUP_ORDER else len(GROUP_ORDER)
 
 
 HL_BG = "#FDE68A"

@@ -301,7 +301,7 @@ class MainWindow(QMainWindow):
             self._bulk.append(b)
         root.addWidget(bar_wrap)
 
-        # 分组胶囊（全部 / winget 可装 / winget 不支持）
+        # 分组胶囊（全部 / 软件 / 运行库 / winget 不支持）
         chip_wrap = QWidget(self.shell)
         chip_wrap.setAttribute(Qt.WA_TranslucentBackground, True)
         cw = QHBoxLayout(chip_wrap)
@@ -965,11 +965,13 @@ class MainWindow(QMainWindow):
         self.snapshot = snapshot
         self.packages = list(snapshot.packages)
         n_re = sum(1 for p in self.packages if p.reinstallable)
+        n_dep = sum(1 for p in self.packages if p.reinstallable and p.isDependency)
         self.log_append("info",
-                        f"扫描完成：共 {len(self.packages)} 个软件，其中可重装 {n_re} 个；"
+                        f"扫描完成：共 {len(self.packages)} 个软件，其中可重装 {n_re} 个"
+                        f"（软件 {n_re - n_dep} 个 + 运行库 {n_dep} 个）；"
                         f"另有 {len(self.packages) - n_re} 项 winget 装不上，"
                         f"统一归入「{UNSUPPORTED_GROUP}」分组"
-                        f"（灰显、不可勾选），排在各分组之后。")
+                        f"（灰显、不可勾选），排在最后。")
         if getattr(snapshot, "exportError", ""):
             # 可重装清单拿不到时所有包都会被判成「不可重装」，必须让用户看见原因
             self.log_append("fail", f"无法获取可重装清单：{snapshot.exportError}")
@@ -1054,7 +1056,8 @@ class MainWindow(QMainWindow):
             g = self._group_of(p)
             counts[g] = counts.get(g, 0) + 1
         items = [("全部", len(self.packages), None)]
-        for group_name in sorted(counts, key=lambda c: (c == UNSUPPORTED_GROUP, c)):
+        # 顺序固定为「软件 → 运行库 → winget 不支持」，与列表小节一致
+        for group_name in sorted(counts, key=group_rank):
             items.append((group_name, counts[group_name], group_name))
         for text, n, cat in items:
             b = QPushButton(f"{text} {n}")
@@ -1085,8 +1088,13 @@ class MainWindow(QMainWindow):
 
     # ── 列表 ──
     def _group_of(self, pkg) -> str:
-        """分组归属：只看能不能被 winget 重装，「winget 不支持」固定沉底。"""
-        return REINSTALLABLE_GROUP if pkg.reinstallable else UNSUPPORTED_GROUP
+        """分组归属：先看能不能被 winget 重装，再看是不是运行库。
+
+        三组固定为「软件 / 运行库 / winget 不支持」，不含任何关键词分类。
+        """
+        if not pkg.reinstallable:
+            return UNSUPPORTED_GROUP
+        return DEPENDENCY_GROUP if pkg.isDependency else SOFTWARE_GROUP
 
     def _section_members(self, title: str) -> list:
         return [r for r in self.rows.values() if self._group_of(r.pkg) == title]
@@ -1168,7 +1176,7 @@ class MainWindow(QMainWindow):
             groups.setdefault(group, []).append(pkg)
         self._matched = sum(len(v) for v in groups.values())
 
-        for group_name in sorted(groups, key=lambda c: (c == UNSUPPORTED_GROUP, c)):
+        for group_name in sorted(groups, key=group_rank):
             sec = GroupSection(group_name, self.expanded.get(group_name, True), self.rows_host)
             sec.header.select_all.connect(lambda c=group_name: self._toggle_group(c))
             if group_name == UNSUPPORTED_GROUP:
@@ -1176,6 +1184,11 @@ class MainWindow(QMainWindow):
                     "winget 装不上的软件都在这里：\n"
                     "· 没有可用的安装源（MSIX/UWP、注册表安装、源里已下架等）\n"
                     "· 灰显且不可勾选，仅作核对，不影响导出")
+            elif group_name == DEPENDENCY_GROUP:
+                sec.header.title.setToolTip(
+                    "运行库与系统组件（VC++/.NET 运行时等）：\n"
+                    "· 它们同样能被 winget 重装，可正常勾选\n"
+                    "· 与「软件」分开列，便于只挑应用或连运行库一并保留")
             # 组内先可勾选、后不可重装（灰行统一沉到底部）
             order = sorted(groups[group_name],
                            key=lambda p: (not p.reinstallable, p.name.lower()))
@@ -1381,14 +1394,14 @@ class MainWindow(QMainWindow):
     def _update_status(self) -> None:
         total = len(self.packages)
         n_re = sum(1 for p in self.packages if p.reinstallable)
+        n_dep = sum(1 for p in self.packages if p.reinstallable and p.isDependency)
         n = len(self.selected_packages())
         # 统计卡与副标题一律用内存里的列表算，别去读快照里的 counts——
         # 两者会因「快照里过滤过 / 列表被后续操作改过」而对不上
         self.stat_total.set_value(str(total))
         self.stat_reinstall.set_value(str(n_re))
         self.stat_selected.set_value(str(n))
-        self.stat_deps.set_value(str(sum(1 for p in self.packages
-                                         if p.isDependency and p.reinstallable)))
+        self.stat_deps.set_value(str(n_dep))
         if n:
             self.sel_lbl.setText(str(n))
             self.sel_lbl.setVisible(True)
@@ -1401,7 +1414,8 @@ class MainWindow(QMainWindow):
         if self.snapshot:
             warn = " · 可重装清单获取失败" if getattr(self.snapshot, "exportError", "") else ""
             self.sub_lbl.setText(
-                f"共 {total} 个已安装 · {n_re} 个可重装 · "
+                f"共 {total} 个已安装 · {n_re} 项可重装"
+                f"（{SOFTWARE_GROUP} {n_re - n_dep} / {DEPENDENCY_GROUP} {n_dep}） · "
                 f"{total - n_re} 项 winget 装不上（归入「{UNSUPPORTED_GROUP}」） · "
                 f"扫描耗时 {self.snapshot.durationMs / 1000:.1f}s{warn}")
         if self.state == "SCANNING":
@@ -1411,8 +1425,8 @@ class MainWindow(QMainWindow):
             self.status_lbl.setText(f"筛选出 {self._matched} / 共 {total} 项{suffix}")
         elif self.snapshot:
             self.status_lbl.setText(
-                f"{n_re} 个软件可一键重装 · {total - n_re} 项 winget 装不上，"
-                f"已归入「{UNSUPPORTED_GROUP}」"
+                f"{n_re - n_dep} 个{SOFTWARE_GROUP} + {n_dep} 个{DEPENDENCY_GROUP}可一键重装 · "
+                f"{total - n_re} 项 winget 装不上，已归入「{UNSUPPORTED_GROUP}」"
                 f" · 勾选后点右下角「导出配置」")
 
     def _flash(self, text: str) -> None:
