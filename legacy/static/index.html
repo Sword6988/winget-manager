@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Winget 软件包管理器</title>
+<style>
+  :root{
+    --bg:#f4f5fa; --card:#ffffff; --line:#e8eaf3; --line-soft:#f1f2f8;
+    --text:#181c28; --muted:#6a7183; --muted-2:#9aa1b5;
+    --accent:#6366f1; --accent-2:#8b5cf6; --accent-deep:#4f46e5;
+    --accent-soft:#eef0ff; --accent-line:#d9dcff;
+    --ok:#0b7a55; --ok-bg:#e7f8f1; --ok-line:#bfeadd;
+    --warn:#b45309; --warn-bg:#fff8e8; --warn-line:#f5e2bb;
+    --err:#c53030; --err-bg:#feeff0; --err-line:#f8cfd1;
+    --grad:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);
+    --shadow-sm:0 1px 2px rgba(24,28,40,.05);
+    --shadow-md:0 1px 2px rgba(24,28,40,.04),0 10px 30px -10px rgba(24,28,40,.14);
+    --shadow-lg:0 24px 64px -16px rgba(24,28,40,.28);
+    --glow:0 6px 18px -4px rgba(99,102,241,.45);
+    --ease:cubic-bezier(.4,0,.2,1);
+    --r-lg:16px; --r-md:12px; --r-sm:9px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    color:var(--text);font-size:14px;line-height:1.5;
+    font-family:"HarmonyOS Sans SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1100px 560px at 88% -8%, rgba(139,92,246,.09), transparent 60%),
+      radial-gradient(900px 480px at -8% -4%, rgba(99,102,241,.10), transparent 55%),
+      var(--bg);
+    background-attachment:fixed;
+  }
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#d2d6e4;border-radius:8px;border:2.5px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#b8bed2;background-clip:content-box;border:2.5px solid transparent}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+  .wrap{max-width:1120px;margin:0 auto;padding:28px 20px 138px}
+  h1{
+    font-size:24px;font-weight:700;margin:0 0 6px;letter-spacing:.2px;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;color:var(--accent-deep);
+  }
+  .sub{color:var(--muted);font-size:12.5px}
+  .sub code{background:#eceef6;padding:1px 6px;border-radius:5px;font-size:11.5px}
+
+  /* ── 顶部 ── */
+  header{display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-bottom:18px}
+  .stats{display:flex;gap:10px;margin-left:auto}
+  .stat{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
+    padding:9px 16px;text-align:center;min-width:84px;box-shadow:var(--shadow-sm);
+    transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s var(--ease);
+    position:relative;overflow:hidden;
+  }
+  .stat::before{content:"";position:absolute;left:0;right:0;top:0;height:2.5px;background:var(--line-soft);transition:background .18s}
+  .stat:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border-color:#dfe2f0}
+  .stat b{display:block;font-size:20px;font-weight:700;line-height:1.35;font-variant-numeric:tabular-nums;transition:color .18s}
+  .stat span{font-size:11px;color:var(--muted);letter-spacing:.3px}
+  .stat.hl::before,.stat:hover::before{background:var(--grad)}
+  .stat.hl b{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+
+  /* ── 工具条（玻璃拟态）── */
+  .toolbar{
+    background:rgba(255,255,255,.72);backdrop-filter:blur(14px) saturate(1.5);
+    -webkit-backdrop-filter:blur(14px) saturate(1.5);
+    border:1px solid rgba(232,234,243,.9);border-radius:var(--r-lg);padding:11px;
+    display:flex;gap:9px;align-items:center;flex-wrap:wrap;box-shadow:var(--shadow-md);
+    position:sticky;top:10px;z-index:20;margin-bottom:14px;
+  }
+  .search{position:relative;flex:1 1 220px;min-width:170px}
+  .search input{
+    width:100%;height:38px;border:1px solid var(--line);border-radius:10px;padding:0 12px 0 34px;
+    font-size:13.5px;font-family:inherit;color:var(--text);background:rgba(250,251,253,.9);
+    outline:none;transition:border-color .18s var(--ease),box-shadow .18s var(--ease),background .18s;
+  }
+  .search input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3.5px rgba(99,102,241,.14)}
+  .search input::placeholder{color:var(--muted-2)}
+  .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:var(--muted-2);transition:stroke .18s}
+  .search:focus-within svg{stroke:var(--accent)}
+  button{
+    font-family:inherit;font-size:13px;font-weight:500;height:38px;padding:0 14px;border-radius:10px;
+    border:1px solid var(--line);background:#fff;color:var(--text);cursor:pointer;white-space:nowrap;
+    transition:transform .15s var(--ease),box-shadow .18s var(--ease),border-color .18s,background .18s,color .18s;
+  }
+  button:hover:not(:disabled){border-color:#cdd2e2;background:#fafbfe;transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+  button:active:not(:disabled){transform:translateY(0) scale(.97);box-shadow:none}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  button.primary{
+    background:var(--grad);border-color:transparent;color:#fff;font-weight:600;box-shadow:var(--glow);
+  }
+  button.primary:hover:not(:disabled){
+    background:linear-gradient(135deg,#575af0 0%,#7c4ff2 100%);
+    transform:translateY(-1px);box-shadow:0 10px 24px -6px rgba(99,102,241,.55);
+  }
+  button.soft{color:var(--accent-deep);border-color:var(--accent-line);background:var(--accent-soft)}
+  button.soft:hover:not(:disabled){background:#e4e8ff;border-color:#c5caff;transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+  .toggle{
+    display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);
+    height:38px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;user-select:none;
+    transition:border-color .18s,color .18s,background .18s;
+  }
+  .toggle:hover{border-color:#cdd2e2;color:var(--text)}
+  .toggle:has(input:checked){color:var(--accent-deep);border-color:var(--accent-line);background:var(--accent-soft)}
+  .toggle input{appearance:none;width:15px;height:15px;border-radius:4.5px;border:1.5px solid #c3c8d8;margin:0;position:relative;cursor:pointer;transition:background .15s,border-color .15s}
+  .toggle input:checked{background:var(--grad);border-color:transparent}
+  .toggle input:checked::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
+
+  /* ── 分类 chips ── */
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+  .chip{
+    font-size:12.5px;font-weight:500;padding:6px 13px;border-radius:20px;border:1px solid var(--line);
+    background:#fff;color:var(--muted);cursor:pointer;user-select:none;
+    transition:transform .15s var(--ease),box-shadow .18s,border-color .18s,background .18s,color .18s;
+  }
+  .chip:hover{color:var(--text);border-color:#cdd2e2;transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+  .chip.on{background:var(--grad);color:#fff;border-color:transparent;box-shadow:0 4px 12px -3px rgba(99,102,241,.4)}
+  .chip.on:hover{transform:translateY(-1px)}
+  .chip .n{opacity:.65;margin-left:5px;font-variant-numeric:tabular-nums}
+
+  /* ── 列表 ── */
+  .group{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:14px;
+    overflow:hidden;box-shadow:var(--shadow-sm);transition:box-shadow .22s var(--ease),border-color .22s;
+    animation:fadeUp .45s var(--ease) both;
+  }
+  .group:hover{box-shadow:var(--shadow-md);border-color:#dfe2f0}
+  #list .group:nth-child(1){animation-delay:.02s}
+  #list .group:nth-child(2){animation-delay:.06s}
+  #list .group:nth-child(3){animation-delay:.10s}
+  #list .group:nth-child(4){animation-delay:.14s}
+  #list .group:nth-child(5){animation-delay:.18s}
+  #list .group:nth-child(6){animation-delay:.22s}
+  #list .group:nth-child(7){animation-delay:.26s}
+  #list .group:nth-child(8){animation-delay:.30s}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .ghead{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line-soft);background:linear-gradient(180deg,#fbfcff,#f8f9fd)}
+  .ghead h2{font-size:13px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px}
+  .ghead h2::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--grad);box-shadow:0 0 0 3px rgba(99,102,241,.14);flex:none}
+  .ghead .gcount{font-size:11.5px;color:var(--muted-2);font-variant-numeric:tabular-nums}
+  .ghead .gsel{margin-left:auto;font-size:12px;font-weight:500;color:var(--accent-deep);cursor:pointer;padding:3px 10px;border-radius:8px;transition:background .15s}
+  .ghead .gsel:hover{background:var(--accent-soft)}
+  .row{display:grid;grid-template-columns:22px 1fr auto auto;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line-soft);cursor:pointer;transition:background .14s var(--ease)}
+  .row:last-child{border-bottom:none}
+  .row:hover{background:#f7f8fe}
+  .row.locked{cursor:default;background:#fcfcfe}
+  .row.locked:hover{background:#fcfcfe}
+  .row.off .rname{color:var(--muted-2)}
+  .row.off .rnote{opacity:.5}
+  .cb{
+    appearance:none;width:19px;height:19px;border-radius:6px;border:1.5px solid #c3c8d8;background:#fff;
+    cursor:pointer;position:relative;transition:background .15s,border-color .15s,box-shadow .15s;margin:0;flex:none;
+  }
+  .cb:hover:not(:disabled){border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+  .cb:checked{background:var(--grad);border-color:transparent;box-shadow:0 2px 8px -2px rgba(99,102,241,.5)}
+  .cb:checked::after{content:"";position:absolute;left:5.5px;top:2px;width:5px;height:9.5px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg);animation:pop .2s var(--ease)}
+  @keyframes pop{0%{transform:rotate(42deg) scale(.3);opacity:0}100%{transform:rotate(42deg) scale(1);opacity:1}}
+  .cb:disabled{background:#eef0f6;border-color:#e0e3ee;cursor:not-allowed}
+  .rmain{min-width:0}
+  .rname{font-size:13.6px;font-weight:500;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .rpkg{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:var(--muted-2);word-break:break-all;margin-top:2px}
+  .rver{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .badges{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;max-width:210px}
+  .tag{font-size:10.5px;font-weight:500;padding:2px 8px;border-radius:6px;line-height:1.6;border:1px solid transparent;white-space:nowrap}
+  .tag.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok-line)}
+  .tag.no{background:#f2f3f8;color:#8b93a6;border-color:#e6e8f0}
+  .tag.dep{background:var(--warn-bg);color:var(--warn);border-color:var(--warn-line)}
+  .tag.src{background:#f3f0fe;color:#6d4fd0;border-color:#e5dffb}
+
+  /* ── 底部栏 ── */
+  .bottombar{
+    position:fixed;left:0;right:0;bottom:0;z-index:40;
+    background:rgba(255,255,255,.82);backdrop-filter:blur(16px) saturate(1.5);
+    -webkit-backdrop-filter:blur(16px) saturate(1.5);
+    border-top:1px solid rgba(232,234,243,.9);box-shadow:0 -8px 30px -18px rgba(24,28,40,.25);
+  }
+  .bb-inner{max-width:1120px;margin:0 auto;padding:11px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .bb-text{font-size:13px;color:var(--muted)}
+  .bb-text b{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;font-size:16px;font-variant-numeric:tabular-nums}
+  .bb-actions{margin-left:auto;display:flex;gap:8px}
+  .progress{height:3px;background:#e9ebf4}
+  .progress i{
+    display:block;height:100%;width:0;transition:width .3s var(--ease);
+    background:linear-gradient(90deg,#6366f1,#8b5cf6,#6366f1);background-size:200% 100%;
+    animation:shimmer 1.4s linear infinite;
+  }
+  @keyframes shimmer{to{background-position:-200% 0}}
+
+  /* ── 通用面板 ── */
+  .mask{position:fixed;inset:0;background:rgba(20,24,40,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:100;display:none;align-items:center;justify-content:center;padding:22px}
+  .mask.on{display:flex;animation:fadeIn .2s var(--ease)}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  .modal{
+    background:#fff;border-radius:18px;width:min(700px,100%);max-height:88vh;display:flex;flex-direction:column;
+    box-shadow:var(--shadow-lg);overflow:hidden;animation:popIn .3s var(--ease);
+  }
+  @keyframes popIn{from{opacity:0;transform:translateY(16px) scale(.97)}to{opacity:1;transform:none}}
+  .mhead{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  .mhead h3{margin:0;font-size:15.5px;font-weight:600}
+  .mhead .close{margin-left:auto;border:none;background:none;font-size:20px;color:var(--muted-2);cursor:pointer;line-height:1;padding:2px 8px;border-radius:8px}
+  .mhead .close:hover{color:var(--text);background:#f1f2f8;transform:none;box-shadow:none}
+  .mbody{padding:18px 20px;overflow:auto;flex:1}
+  .mfoot{padding:13px 20px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fbfcfe}
+  .hint{font-size:12px;color:var(--muted-2)}
+  .field{margin-bottom:15px}
+  .field label{display:block;font-size:12.5px;font-weight:500;color:var(--muted);margin-bottom:6px}
+  .field input[type=text],.field textarea{
+    width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13.5px;
+    font-family:inherit;outline:none;background:#fafbfd;color:var(--text);
+    transition:border-color .18s,box-shadow .18s,background .18s;
+  }
+  .field input[type=text]:focus,.field textarea:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3.5px rgba(99,102,241,.14)}
+  .field textarea{resize:vertical;min-height:56px}
+  .checkline{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text);margin:7px 0;cursor:pointer}
+  .checkline input{appearance:none;width:17px;height:17px;border-radius:5px;border:1.5px solid #c3c8d8;position:relative;margin:0;cursor:pointer;transition:background .15s,border-color .15s;flex:none}
+  .checkline input:checked{background:var(--grad);border-color:transparent}
+  .checkline input:checked::after{content:"";position:absolute;left:4.5px;top:1.5px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
+  .checkline small{color:var(--muted-2)}
+
+  .tabs{display:inline-flex;gap:3px;background:#eef0f7;border-radius:11px;padding:3px;margin-bottom:15px}
+  .tab{padding:7px 16px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-radius:8px;transition:all .18s var(--ease)}
+  .tab:hover{color:var(--text)}
+  .tab.on{color:var(--accent-deep);background:#fff;font-weight:600;box-shadow:var(--shadow-sm)}
+
+  .drop{border:1.5px dashed #ccd2e4;border-radius:var(--r-md);padding:28px;text-align:center;color:var(--muted);font-size:13px;cursor:pointer;transition:all .2s var(--ease);background:#fbfcfe}
+  .drop:hover,.drop.hot{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-deep)}
+  .drop b{display:block;font-size:14px;color:var(--text);margin-bottom:5px}
+  .drop.hot b{color:var(--accent-deep)}
+
+  .logbox{
+    background:#0d1017;border-radius:var(--r-md);padding:13px 14px;height:250px;overflow:auto;
+    font-family:ui-monospace,Consolas,monospace;font-size:11.8px;line-height:1.7;color:#c9d1d9;
+    box-shadow:inset 0 1px 4px rgba(0,0,0,.4);
+  }
+  .logline{white-space:pre-wrap;word-break:break-all}
+  .logline.success{color:#4ade80}
+  .logline.failed{color:#f87171}
+  .logline.skipped{color:#c4b5fd}
+  .logline.meta{color:#8b949e}
+
+  .result-card{border:1px solid var(--line);border-radius:var(--r-md);padding:13px 15px;margin-bottom:10px;background:#fbfcfe;transition:border-color .18s,box-shadow .18s}
+  .result-card:hover{border-color:#d9dcf0;box-shadow:var(--shadow-sm)}
+  .result-card .rlabel{font-size:11.5px;color:var(--muted-2);margin-bottom:4px}
+  .result-card .rpath{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;word-break:break-all;color:var(--text)}
+  .warnbox{background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:12px}
+  .errbox{background:var(--err-bg);border:1px solid var(--err-line);color:var(--err);border-radius:10px;padding:10px 12px;font-size:12.8px;margin-bottom:12px}
+  .okbox{background:var(--ok-bg);border:1px solid var(--ok-line);color:var(--ok);border-radius:10px;padding:10px 12px;font-size:12.8px;margin-bottom:12px}
+
+  table.doc{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.doc th,table.doc td{border-bottom:1px solid var(--line-soft);padding:7px 9px;text-align:left;vertical-align:top}
+  table.doc th{background:#fbfcfe;font-weight:600;color:var(--muted);font-size:11.5px}
+  table.doc td code{background:#f1f2f8;padding:1px 6px;border-radius:5px;font-size:11.5px;font-family:ui-monospace,Consolas,monospace}
+  pre.doc{background:#0d1017;color:#c9d1d9;border-radius:var(--r-md);padding:14px;overflow:auto;font-size:11.5px;line-height:1.65;font-family:ui-monospace,Consolas,monospace;box-shadow:inset 0 1px 4px rgba(0,0,0,.4)}
+  .sec-title{font-size:13.5px;font-weight:600;margin:20px 0 9px}
+  .sec-title:first-child{margin-top:0}
+
+  .skeleton{background:linear-gradient(90deg,#eceef6 25%,#f7f8fc 37%,#eceef6 63%);background-size:400% 100%;animation:sk 1.3s ease infinite;border-radius:7px;height:14px}
+  @keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+  .empty{padding:48px;text-align:center;color:var(--muted-2);font-size:13px}
+  .toast{
+    position:fixed;left:50%;bottom:88px;transform:translate(-50%,12px);
+    background:#181c28;color:#fff;font-size:13px;font-weight:500;padding:10px 20px;border-radius:12px;
+    opacity:0;pointer-events:none;transition:opacity .25s var(--ease),transform .25s var(--ease);
+    z-index:200;box-shadow:var(--shadow-lg);
+  }
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  }
+  @media (max-width:760px){
+    .row{grid-template-columns:22px 1fr;gap:6px 10px}
+    .rver,.badges{grid-column:2;justify-content:flex-start}
+    .stats{width:100%;margin-left:0}
+    .stat{flex:1}
+    .wrap{padding:20px 14px 138px}
+  }
+  @media (max-width:520px){
+    h1{font-size:20px}
+    .toolbar{position:static}
+    .bb-inner{flex-direction:column;align-items:stretch;gap:9px;padding:10px 14px}
+    .bb-text{text-align:center}
+    .bb-actions{margin-left:0;display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:8px}
+    .bb-actions button{padding:0 6px;font-size:12.5px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Winget 软件包管理器</h1>
+      <div class="sub" id="subtitle">正在读取本机已安装软件…</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="statTotal">—</b><span>可重装</span></div>
+      <div class="stat hl"><b id="statReinstall">—</b><span>本机已装</span></div>
+      <div class="stat"><b id="statSel" style="color:var(--accent)">—</b><span>已勾选</span></div>
+    </div>
+  </header>
+
+  <div id="banner"></div>
+
+  <div class="toolbar">
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="q" type="text" placeholder="搜索名称或包 ID，例如 git、微信、vcredist">
+    </div>
+    <button onclick="selectAll(true)">全选</button>
+    <button onclick="selectAll(false)">全不选</button>
+    <button onclick="invert()">反选</button>
+    <label class="toggle"><input type="checkbox" id="fNoDep" onchange="render()">隐藏运行库</label>
+    <button id="btnScan" class="soft" onclick="scan(true)">重新扫描</button>
+  </div>
+
+  <div class="chips" id="chips"></div>
+  <div id="list"></div>
+</div>
+
+<div class="progress"><i id="bar"></i></div>
+<div class="bottombar">
+  <div class="bb-inner">
+    <div class="bb-text">已勾选 <b id="bbSel">0</b> / 可重装 <span id="bbRe">0</span> 个 &nbsp;·&nbsp; 全部 <span id="bbAll">0</span></div>
+    <div class="bb-actions">
+      <button onclick="openHelp()">JSON 结构说明</button>
+      <button onclick="openImport()">导入恢复</button>
+      <button class="primary" onclick="openExport()">导出配置</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导出 -->
+<div class="mask" id="maskExport" onclick="if(event.target===this)closeModal('maskExport')">
+  <div class="modal">
+    <div class="mhead"><h3>导出配置</h3><button class="close" onclick="closeModal('maskExport')">×</button></div>
+    <div class="mbody">
+      <div id="exportBody">
+        <div class="field">
+          <label>配置名称</label>
+          <input type="text" id="pName" maxlength="60" placeholder="例如：办公主力机">
+        </div>
+        <div class="field">
+          <label>备注（可选）</label>
+          <textarea id="pDesc" maxlength="300" placeholder="例如：2026 年重装系统用，含开发环境"></textarea>
+        </div>
+        <div class="field">
+          <label>导出格式</label>
+          <div class="checkline"><input type="checkbox" id="fProfile" checked><span>本工具格式 <small>（含名称/版本/分类等元数据，便于以后再次编辑）</small></span></div>
+          <div class="checkline"><input type="checkbox" id="fWinget" checked><span>winget 原生格式 <small>（精简，可直接 <code>winget import -i</code>）</small></span></div>
+        </div>
+        <div class="hint" id="exportSummary"></div>
+      </div>
+      <div id="exportResult"></div>
+    </div>
+    <div class="mfoot">
+      <button class="primary" id="btnDoExport" onclick="doExport()">生成 JSON</button>
+      <button onclick="closeModal('maskExport')">关闭</button>
+      <span class="hint" id="exportHint">文件会写入工具的 exports 目录</span>
+    </div>
+  </div>
+</div>
+
+<!-- 导入 -->
+<div class="mask" id="maskImport" onclick="if(event.target===this)closeModal('maskImport')">
+  <div class="modal">
+    <div class="mhead"><h3>导入配置并批量安装</h3><button class="close" onclick="closeModal('maskImport')">×</button></div>
+    <div class="mbody">
+      <div class="tabs">
+        <div class="tab on" id="tabFile" onclick="switchTab('file')">选择本地文件</div>
+        <div class="tab" id="tabHist" onclick="switchTab('hist')">历史导出</div>
+      </div>
+      <div id="paneFile">
+        <div class="drop" id="drop" onclick="document.getElementById('fileInput').click()">
+          <b>点击选择 JSON 配置文件</b>
+          支持本工具导出的 .profile.json / .winget.json，也支持 winget 原生导出文件
+        </div>
+        <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
+        <div class="hint" id="fileInfo" style="margin-top:10px"></div>
+      </div>
+      <div id="paneHist" style="display:none">
+        <div class="hint" style="margin-bottom:8px" id="histDir"></div>
+        <div id="histList"></div>
+      </div>
+      <div id="importProgress" style="display:none;margin-top:16px">
+        <div class="bb-text" style="margin-bottom:6px">进度 <b id="impDone">0</b> / <span id="impTotal">0</span></div>
+        <div class="progress" style="height:5px;border-radius:3px;overflow:hidden;margin-bottom:10px"><i id="impBar" style="width:0"></i></div>
+        <div class="logbox" id="logbox"></div>
+      </div>
+      <div id="importResult"></div>
+    </div>
+    <div class="mfoot">
+      <button class="primary" id="btnDoImport" onclick="doImport()" disabled>开始导入</button>
+      <button id="btnCancel" onclick="cancelImport()" style="display:none">取消</button>
+      <button onclick="closeModal('maskImport')">关闭</button>
+      <span class="hint">安装过程由 winget 执行，可能需要几分钟</span>
+    </div>
+  </div>
+</div>
+
+<!-- 帮助 -->
+<div class="mask" id="maskHelp" onclick="if(event.target===this)closeModal('maskHelp')">
+  <div class="modal">
+    <div class="mhead"><h3>JSON 文件结构与字段说明</h3><button class="close" onclick="closeModal('maskHelp')">×</button></div>
+    <div class="mbody" id="helpBody"></div>
+    <div class="mfoot"><button onclick="closeModal('maskHelp')">知道了</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ════════════ API 客户端：统一错误映射、5xx 重试 ════════════ */
+const ApiError = class extends Error {
+  constructor(message, status, code){ super(message); this.status = status; this.code = code; }
+};
+
+async function request(path, options = {}, attempt = 0) {
+  const opts = Object.assign({ credentials: "same-origin", headers: {} }, options);
+  if (opts.body && typeof opts.body !== "string") {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(opts.body);
+  }
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch (networkError) {
+    throw new ApiError("无法连接到本地服务，请确认运行窗口没有关闭。", 0, "offline");
+  }
+  if (!res.ok) {
+    let payload = {};
+    try { payload = await res.json(); } catch (_) { /* 非 JSON 错误体 */ }
+    const err = payload.error || {};
+    const message = err.message || defaultMessage(res.status);
+    if (res.status >= 500 && attempt < 2) {
+      await sleep(400 * (attempt + 1));
+      return request(path, options, attempt + 1);
+    }
+    throw new ApiError(message, res.status, err.code || "http_error");
+  }
+  const type = res.headers.get("Content-Type") || "";
+  return type.includes("application/json") ? res.json() : res.text();
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function defaultMessage(status){
+  if (status === 401) return "会话已失效，请刷新页面。";
+  if (status === 404) return "请求的资源不存在。";
+  if (status === 409) return "已有导入任务在运行，请等待完成。";
+  if (status === 429) return "操作过于频繁，请稍后再试。";
+  return `请求失败（HTTP ${status}）`;
+}
+
+/* ════════════ 状态 ════════════ */
+const state = {
+  packages: [],
+  sel: new Set(),
+  cat: "全部",
+  q: "",
+  meta: null,
+  scanning: false,
+  importFile: null,
+  importFileName: "",
+  jobId: null,
+  es: null,
+};
+const STORE_KEY = "wpm-selection-v1";
+
+/* ════════════ 渲染 ════════════ */
+const el = (id) => document.getElementById(id);
+
+function categories(){
+  const map = new Map();
+  state.packages.forEach(p => map.set(p.category, (map.get(p.category) || 0) + 1));
+  return [...map.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function visible(p){
+  if (el("fNoDep").checked && p.isDependency) return false;
+  if (state.cat !== "全部" && p.category !== state.cat) return false;
+  if (state.q) {
+    const q = state.q.toLowerCase();
+    if (!(p.name + " " + p.packageIdentifier).toLowerCase().includes(q)) return false;
+  }
+  return true;
+}
+
+function renderChips(){
+  const cats = categories();
+  let html = `<div class="chip ${state.cat === "全部" ? "on" : ""}" data-cat="全部">全部<span class="n">${state.packages.length}</span></div>`;
+  cats.forEach(([name, count]) => {
+    html += `<div class="chip ${state.cat === name ? "on" : ""}" data-cat="${esc(name)}">${esc(name)}<span class="n">${count}</span></div>`;
+  });
+  el("chips").innerHTML = html;
+  el("chips").querySelectorAll(".chip").forEach(node => {
+    node.onclick = () => { state.cat = node.dataset.cat; render(); };
+  });
+}
+
+function badge(p){
+  const out = [];
+  if (p.reinstallable) out.push('<span class="tag ok">可重装</span>');
+  else out.push('<span class="tag no" title="MSIX/UWP 包或注册表安装的软件，winget 无法自动重装">不可重装</span>');
+  if (p.isDependency) out.push('<span class="tag dep">运行库</span>');
+  if (p.idKind === "msix") out.push('<span class="tag src">MSIX</span>');
+  else if (p.idKind === "registry") out.push('<span class="tag src">注册表</span>');
+  return out.join("");
+}
+
+function renderList(){
+  const groups = new Map();
+  state.packages.filter(visible).forEach(p => {
+    if (!groups.has(p.category)) groups.set(p.category, []);
+    groups.get(p.category).push(p);
+  });
+  if (!groups.size) {
+    el("list").innerHTML = `<div class="group"><div class="empty">没有符合条件的软件</div></div>`;
+    return;
+  }
+  let html = "";
+  groups.forEach((items, cat) => {
+    const selectable = items.filter(p => p.reinstallable);
+    const chosen = selectable.filter(p => state.sel.has(p.packageIdentifier)).length;
+    html += `<div class="group"><div class="ghead">
+      <h2>${esc(cat)}</h2><span class="gcount">${items.length} 项</span>
+      ${selectable.length ? `<span class="gsel" data-cat="${esc(cat)}">已选 ${chosen}/${selectable.length} · 全选本组</span>` : ""}
+    </div>`;
+    items.forEach(p => {
+      const on = state.sel.has(p.packageIdentifier);
+      const locked = !p.reinstallable;
+      html += `<div class="row ${on ? "" : "off"} ${locked ? "locked" : ""}" data-id="${esc(p.packageIdentifier)}">
+        <input class="cb" type="checkbox" ${on ? "checked" : ""} ${locked ? "disabled" : ""} tabindex="-1">
+        <div class="rmain">
+          <div class="rname">${esc(p.name)}</div>
+          <div class="rpkg">${esc(p.packageIdentifier)}</div>
+        </div>
+        <div class="rver">${esc(p.version || "—")}</div>
+        <div class="badges">${badge(p)}</div>
+      </div>`;
+    });
+    html += "</div>";
+  });
+  el("list").innerHTML = html;
+
+  el("list").querySelectorAll(".row").forEach(row => {
+    const id = row.dataset.id;
+    const pkg = state.packages.find(p => p.packageIdentifier === id);
+    row.onclick = () => {
+      if (!pkg || !pkg.reinstallable) return;
+      toggle(id);
+      row.classList.toggle("off", !state.sel.has(id));
+      row.querySelector(".cb").checked = state.sel.has(id);
+      updateStats();
+      updateGroupLabel(row.closest(".group"));
+    };
+  });
+  el("list").querySelectorAll(".gsel").forEach(node => {
+    node.onclick = (event) => {
+      event.stopPropagation();
+      const items = state.packages.filter(p => p.category === node.dataset.cat && p.reinstallable);
+      const allOn = items.every(p => state.sel.has(p.packageIdentifier));
+      items.forEach(p => allOn ? state.sel.delete(p.packageIdentifier) : state.sel.add(p.packageIdentifier));
+      persist(); render(); 
+    };
+  });
+}
+
+function updateGroupLabel(group){
+  if (!group) return;
+  const label = group.querySelector(".gsel");
+  if (!label) return;
+  const items = state.packages.filter(p => p.category === label.dataset.cat && p.reinstallable);
+  const chosen = items.filter(p => state.sel.has(p.packageIdentifier)).length;
+  label.textContent = `已选 ${chosen}/${items.length} · 全选本组`;
+}
+
+function updateStats(){
+  el("statTotal").textContent = state.packages.length;
+  el("statReinstall").textContent = state.meta?.counts?.total ?? state.packages.length;
+  el("statSel").textContent = state.sel.size;
+  el("bbSel").textContent = state.sel.size;
+  el("bbRe").textContent = state.packages.length;
+  el("bbAll").textContent = state.packages.length;
+  el("bar").style.width = state.packages.length ? (state.sel.size / state.packages.length * 100) + "%" : "0";
+  const summary = el("exportSummary");
+  if (summary) {
+    summary.textContent = `将导出 ${state.sel.size} 个软件（均可通过 winget 重装）。`;
+  }
+}
+
+function render(){
+  renderChips();
+  renderList();
+  updateStats();
+}
+
+/* ════════════ 选择与持久化 ════════════ */
+function toggle(id){ state.sel.has(id) ? state.sel.delete(id) : state.sel.add(id); persist(); }
+
+function persist(){
+  try { localStorage.setItem(STORE_KEY, JSON.stringify([...state.sel])); } catch (_) {}
+}
+
+function restore(){
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+    if (Array.isArray(raw)) {
+      const known = new Set(state.packages.map(p => p.packageIdentifier));
+      raw.filter(id => known.has(id)).forEach(id => state.sel.add(id));
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function selectAll(on){
+  state.packages.filter(visible).filter(p => p.reinstallable).forEach(p => on ? state.sel.add(p.packageIdentifier) : state.sel.delete(p.packageIdentifier));
+  persist(); render();
+}
+function invert(){
+  state.packages.filter(visible).filter(p => p.reinstallable).forEach(p => {
+    state.sel.has(p.packageIdentifier) ? state.sel.delete(p.packageIdentifier) : state.sel.add(p.packageIdentifier);
+  });
+  persist(); render();
+}
+
+/* ════════════ 扫描 ════════════ */
+async function scan(force){
+  if (state.scanning) return;
+  state.scanning = true;
+  el("btnScan").disabled = true;
+  el("btnScan").textContent = "扫描中…";
+  el("list").innerHTML = `<div class="group"><div style="padding:18px 16px">
+    <div class="skeleton" style="width:36%;margin-bottom:12px"></div>
+    <div class="skeleton" style="width:70%;margin-bottom:10px"></div>
+    <div class="skeleton" style="width:55%;margin-bottom:10px"></div>
+    <div class="skeleton" style="width:64%"></div></div></div>`;
+  el("banner").innerHTML = "";
+  try {
+    const data = await request(`/api/catalog${force ? "?refresh=1" : ""}`);
+    state.packages = (data.packages || []).filter(p => p.reinstallable);
+    state.meta = data;
+    const hidden = Math.max(0, (data.counts?.total || 0) - state.packages.length);
+    el("banner").innerHTML = hidden > 0
+      ? `<div class="note" style="background:#f6f7f9;border:1px solid var(--line-soft);border-radius:9px;padding:9px 14px;font-size:12.5px;color:var(--muted)">已隐藏 ${hidden} 个无法通过 winget 自动重装的软件（MSIX/UWP 或注册表安装），它们不会出现在列表里。</div>`
+      : "";
+    const restored = restore();
+    if (!restored) {
+      state.packages.filter(p => p.reinstallable).forEach(p => state.sel.add(p.packageIdentifier));
+      persist();
+    }
+    el("subtitle").innerHTML = `${esc(data.machine.hostname)} · ${esc(data.machine.os)} · winget ${esc(data.wingetVersion)} · 耗时 ${(data.durationMs / 1000).toFixed(1)}s`;
+    render();
+  } catch (err) {
+    el("list").innerHTML = "";
+    el("banner").innerHTML = `<div class="errbox">扫描失败：${esc(err.message)}<br><span style="font-size:12px;opacity:.8">可以点击「重新扫描」重试；若持续失败，请查看启动窗口里的错误日志。</span></div>`;
+    el("subtitle").textContent = "未能读取软件列表";
+  } finally {
+    state.scanning = false;
+    el("btnScan").disabled = false;
+    el("btnScan").textContent = "重新扫描";
+  }
+}
+
+/* ════════════ 模态框 ════════════ */
+function openModal(id){ el(id).classList.add("on"); }
+function closeModal(id){ el(id).classList.remove("on"); if (id === "maskImport") stopStream(); }
+
+function openHelp(){
+  el("helpBody").innerHTML = HELP_HTML;
+  openModal("maskHelp");
+}
+
+function openExport(){
+  if (!state.sel.size) { toast("请先勾选需要保留的软件"); return; }
+  el("exportResult").innerHTML = "";
+  el("exportBody").style.display = "";
+  el("btnDoExport").disabled = false;
+  el("btnDoExport").textContent = "生成 JSON";
+  if (!el("pName").value) {
+    const host = state.meta?.machine?.hostname || "本机";
+    el("pName").value = `${host} 软件清单`;
+  }
+  updateStats();
+  openModal("maskExport");
+}
+
+async function doExport(){
+  const btn = el("btnDoExport");
+  btn.disabled = true;
+  btn.textContent = "生成中…";
+  try {
+    const data = await request("/api/export", {
+      method: "POST",
+      body: {
+        profileName: el("pName").value.trim() || "我的软件清单",
+        description: el("pDesc").value.trim(),
+        selectedIds: [...state.sel],
+        formats: { profile: el("fProfile").checked, winget: el("fWinget").checked },
+      },
+    });
+    el("exportBody").style.display = "none";
+    let html = `<div class="okbox">已导出 ${data.packageCount} 个软件包。</div>`;
+    if (data.profileFile) {
+      html += `<div class="result-card"><div class="rlabel">本工具格式</div>
+        <div class="rpath">${esc(data.profilePath)}</div>
+        <div style="margin-top:8px"><a href="/api/download?file=${encodeURIComponent(data.profileFile)}"><button class="soft">下载 ${esc(data.profileFile)}</button></a></div></div>`;
+    }
+    if (data.wingetFile) {
+      html += `<div class="result-card"><div class="rlabel">winget 原生格式（可直接 winget import）</div>
+        <div class="rpath">${esc(data.wingetPath)}</div>
+        <div style="margin-top:8px"><a href="/api/download?file=${encodeURIComponent(data.wingetFile)}"><button class="soft">下载 ${esc(data.wingetFile)}</button></a></div></div>`;
+    }
+    if (data.skipped?.length) {
+      html += `<div class="warnbox">有 ${data.skipped.length} 个应用无法通过 winget 重装，已写入 skippedPackages 供参考：<br>${data.skipped.slice(0, 8).map(s => "· " + esc(s.name || s.packageIdentifier)).join("<br>")}${data.skipped.length > 8 ? "<br>…" : ""}</div>`;
+    }
+    html += `<div class="hint">文件已同时保存在工具的 exports 目录，重装系统后可从「导入恢复 → 历史导出」直接调用。</div>`;
+    el("exportResult").innerHTML = html;
+  } catch (err) {
+    el("exportResult").innerHTML = `<div class="errbox">导出失败：${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "重新生成";
+  }
+}
+
+/* ════════════ 导入 ════════════ */
+function openImport(){
+  resetImportUI();
+  openModal("maskImport");
+  loadHistory();
+}
+
+function resetImportUI(){
+  el("importProgress").style.display = "none";
+  el("importResult").innerHTML = "";
+  el("logbox").innerHTML = "";
+  el("impBar").style.width = "0";
+  el("btnCancel").style.display = "none";
+  el("btnDoImport").disabled = !state.importFile;
+  el("btnDoImport").textContent = "开始导入";
+  if (state.importFile) el("btnDoImport").disabled = false;
+}
+
+function switchTab(which){
+  el("tabFile").classList.toggle("on", which === "file");
+  el("tabHist").classList.toggle("on", which === "hist");
+  el("paneFile").style.display = which === "file" ? "" : "none";
+  el("paneHist").style.display = which === "hist" ? "" : "none";
+}
+
+async function loadHistory(){
+  try {
+    const data = await request("/api/exports");
+    el("histDir").textContent = `目录：${data.dir}`;
+    if (!data.files.length) {
+      el("histList").innerHTML = `<div class="empty" style="padding:24px">还没有导出过配置文件</div>`;
+      return;
+    }
+    el("histList").innerHTML = data.files.map(file =>
+      `<div class="result-card" style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="flex:1;min-width:0">
+          <div class="rpath">${esc(file.name)}</div>
+          <div class="rlabel">${esc(file.modified)} · ${(file.size / 1024).toFixed(1)} KB</div>
+        </div>
+        <button class="soft" onclick="pickHistory('${esc(file.name)}')">选择</button>
+      </div>`).join("");
+  } catch (err) {
+    el("histList").innerHTML = `<div class="errbox">${esc(err.message)}</div>`;
+  }
+}
+
+async function pickHistory(name){
+  try {
+    const text = await fetch(`/api/download?file=${encodeURIComponent(name)}`, { credentials: "same-origin" }).then(r => {
+      if (!r.ok) throw new Error("读取失败");
+      return r.text();
+    });
+    setImportFile(name, text);
+    switchTab("file");
+  } catch (err) {
+    el("importResult").innerHTML = `<div class="errbox">读取文件失败，请直接选择本地文件。</div>`;
+  }
+}
+
+function setImportFile(name, text){
+  state.importFile = { name, content: text };
+  state.importFileName = name;
+  let count = 0;
+  let valid = false;
+  try {
+    const data = JSON.parse(text);
+    const list = Array.isArray(data) ? data
+      : data.packages ? data.packages
+      : data.Sources ? data.Sources.flatMap(s => s.Packages || []) : [];
+    count = list.length;
+    valid = count > 0;
+  } catch (_) {}
+  el("fileInfo").innerHTML = valid
+    ? `已选择 <b>${esc(name)}</b>，识别到 <b>${count}</b> 个软件包`
+    : `<span style="color:var(--err)">${esc(name)} 不是有效的清单文件</span>`;
+  el("btnDoImport").disabled = !valid;
+}
+
+el("fileInput").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  setImportFile(file.name, text);
+});
+
+["dragenter", "dragover"].forEach(name => el("drop").addEventListener(name, (e) => {
+  e.preventDefault(); el("drop").classList.add("hot");
+}));
+["dragleave", "drop"].forEach(name => el("drop").addEventListener(name, (e) => {
+  e.preventDefault(); el("drop").classList.remove("hot");
+}));
+el("drop").addEventListener("drop", async (e) => {
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  setImportFile(file.name, await file.text());
+});
+
+async function doImport(){
+  if (!state.importFile) return;
+  el("btnDoImport").disabled = true;
+  el("importResult").innerHTML = "";
+  el("importProgress").style.display = "";
+  el("logbox").innerHTML = "";
+  el("impDone").textContent = "0";
+  el("impTotal").textContent = "?";
+  appendLog("正在提交导入任务…", "meta");
+  try {
+    const data = await request("/api/import", {
+      method: "POST",
+      body: { filename: state.importFile.name, content: state.importFile.content },
+    });
+    state.jobId = data.jobId;
+    el("impTotal").textContent = data.total;
+    el("btnCancel").style.display = "";
+    appendLog(`任务已创建：${data.profileName}（${data.total} 个包，${data.format} 格式）`, "meta");
+    startStream(data.jobId);
+  } catch (err) {
+    el("importResult").innerHTML = `<div class="errbox">导入失败：${esc(err.message)}</div>`;
+    el("btnDoImport").disabled = false;
+  }
+}
+
+function startStream(jobId){
+  stopStream();
+  const es = new EventSource(`/api/jobs/${jobId}/events?after=0`);
+  state.es = es;
+  es.onmessage = (event) => {
+    let data;
+    try { data = JSON.parse(event.data); } catch (_) { return; }
+    if (data.type === "done") {
+      finishImport(data);
+      stopStream();
+      return;
+    }
+    if (data.type === "progress") {
+      el("impDone").textContent = data.done ?? 0;
+      el("impTotal").textContent = data.total ?? el("impTotal").textContent;
+      const total = Number(data.total) || 1;
+      el("impBar").style.width = Math.min(100, (Number(data.done) || 0) / total * 100) + "%";
+      appendLog(data.message, data.result || "log");
+      return;
+    }
+    appendLog(data.message, data.type === "hello" ? "meta" : "log");
+  };
+  es.onerror = () => {
+    appendLog("事件流断开，正在读取最终状态…", "meta");
+    stopStream();
+    pollJob(jobId);
+  };
+}
+
+function stopStream(){
+  if (state.es) { state.es.close(); state.es = null; }
+}
+
+async function pollJob(jobId){
+  try {
+    const snap = await request(`/api/jobs/${jobId}`);
+    if (snap.status === "running") { setTimeout(() => pollJob(jobId), 2000); return; }
+    (snap.events || []).slice(-30).forEach(ev => appendLog(ev.message, ev.result || "log"));
+    finishJob(snap.status, snap);
+  } catch (err) {
+    el("importResult").innerHTML = `<div class="errbox">无法获取任务状态：${esc(err.message)}</div>`;
+  }
+}
+
+function finishImport(event){
+  finishJob(event.status, event);
+}
+
+function finishJob(status, payload){
+  const counts = payload.counts || {};
+  el("btnCancel").style.display = "none";
+  el("btnDoImport").disabled = false;
+  el("btnDoImport").textContent = "再次导入";
+  if (counts.success != null) {
+    el("impDone").textContent = (counts.success || 0) + (counts.failed || 0) + (counts.skipped || 0);
+    el("impBar").style.width = "100%";
+  }
+  if (status === "succeeded") {
+    el("importResult").innerHTML = `<div class="okbox">导入完成：成功 ${counts.success || 0}，跳过 ${counts.skipped || 0}，失败 ${counts.failed || 0}。</div>`;
+    toast("导入完成");
+  } else if (status === "cancelled") {
+    el("importResult").innerHTML = `<div class="warnbox">导入已取消。</div>`;
+  } else {
+    el("importResult").innerHTML = `<div class="errbox">导入未全部成功：成功 ${counts.success || 0}，跳过 ${counts.skipped || 0}，失败 ${counts.failed || 0}。详情见上方日志。</div>`;
+  }
+  scan(true);
+}
+
+async function cancelImport(){
+  if (!state.jobId) return;
+  try {
+    await request(`/api/jobs/${state.jobId}/cancel`, { method: "POST", body: {} });
+    el("btnCancel").disabled = true;
+    appendLog("已发送取消请求…", "meta");
+  } catch (err) { toast(err.message); }
+}
+
+function appendLog(text, kind){
+  const box = el("logbox");
+  const line = document.createElement("div");
+  line.className = "logline " + (kind || "log");
+  line.textContent = text;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ════════════ 工具 ════════════ */
+function esc(text){
+  return String(text ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function toast(message){
+  const node = el("toast");
+  node.textContent = message;
+  node.classList.add("on");
+  clearTimeout(node._t);
+  node._t = setTimeout(() => node.classList.remove("on"), 2000);
+}
+
+/* ════════════ 帮助文档 ════════════ */
+const HELP_HTML = `
+<div class="sec-title">一、两种导出格式，怎么选</div>
+<table class="doc">
+  <tr><th style="width:150px">文件</th><th style="width:130px">用途</th><th>说明</th></tr>
+  <tr><td><code>.winget.json</code></td><td>winget 原生</td><td>精简清单，只含 <code>PackageIdentifier</code>，可直接 <code>winget import -i 文件</code>，任何机器通用。</td></tr>
+  <tr><td><code>.profile.json</code></td><td>本工具格式</td><td>在原生清单基础上多存了名称、版本、分类与跳过记录，方便以后重新导入本工具继续编辑。</td></tr>
+</table>
+
+<div class="sec-title">二、winget 原生格式（可直接导入）</div>
+<pre class="doc">{
+  "$schema": "https://aka.ms/winget-packages.schema.2.0.json",
+  "CreationDate": "2026-11-02T13:20:11.482+08:00",
+  "Sources": [
+    {
+      "Packages": [
+        { "PackageIdentifier": "Git.Git" },
+        { "PackageIdentifier": "7zip.7zip" }
+      ],
+      "SourceDetails": {
+        "Argument": "https://cdn.winget.microsoft.com/cache",
+        "Identifier": "Microsoft.Winget.Source_8wekyb3d8bbwe",
+        "Name": "winget",
+        "Type": "Microsoft.PreIndexed.Package"
+      }
+    }
+  ],
+  "WinGetVersion": "1.30.100-preview"
+}</pre>
+<table class="doc">
+  <tr><th style="width:190px">字段</th><th style="width:90px">类型</th><th>含义</th></tr>
+  <tr><td><code>$schema</code></td><td>string</td><td>固定为 winget 的包清单 schema 地址，winget 靠它识别文件类型。</td></tr>
+  <tr><td><code>CreationDate</code></td><td>ISO8601</td><td>导出时间，带时区偏移。</td></tr>
+  <tr><td><code>Sources[].Packages[]</code></td><td>array</td><td>按来源分组的软件包数组，元素只需一个字段。</td></tr>
+  <tr><td><code>PackageIdentifier</code></td><td>string</td><td>winget 的唯一包 ID，如 <code>Microsoft.Python.3.13</code>；msstore 源则是商店产品 ID。</td></tr>
+  <tr><td><code>Sources[].SourceDetails</code></td><td>object</td><td>来源定义：<code>winget</code> 走微软 CDN，<code>msstore</code> 走商店接口。</td></tr>
+  <tr><td><code>WinGetVersion</code></td><td>string</td><td>生成该文件的 winget 版本，仅作参考。</td></tr>
+</table>
+
+<div class="sec-title">三、本工具格式（.profile.json）</div>
+<pre class="doc">{
+  "$schema": "../schema/winget-profile.schema.v1.json",
+  "schemaVersion": "1.0",
+  "generator": { "name": "Winget Package Manager", "version": "1.0.0" },
+  "profile": {
+    "name": "办公主力机",
+    "description": "重装系统用",
+    "createdAt": "2026-11-02T13:20:11+08:00",
+    "createdOn": {
+      "hostname": "SHIBENG-PC", "os": "Windows 11 26100", "arch": "AMD64",
+      "wingetVersion": "1.30.100-preview"
+    },
+    "counts": { "total": 43, "reinstallable": 40, "skipped": 3 }
+  },
+  "packages": [
+    {
+      "packageIdentifier": "Git.Git",
+      "name": "Git",
+      "version": "2.56.0.4",
+      "source": "winget",
+      "category": "开发工具",
+      "reinstallable": true
+    }
+  ],
+  "skippedPackages": [
+    { "packageIdentifier": "MSIX\\\\xxx", "name": "DeepSeek", "reason": "该应用无法通过 winget 自动重装" }
+  ]
+}</pre>
+<table class="doc">
+  <tr><th style="width:190px">字段</th><th style="width:90px">类型</th><th>含义</th></tr>
+  <tr><td><code>schemaVersion</code></td><td>string</td><td>本工具格式版本，当前 <code>1.0</code>；导入时按这个字段判断解析方式。</td></tr>
+  <tr><td><code>profile.name / description</code></td><td>string</td><td>配置名称与备注，导出时填写，导入时显示。</td></tr>
+  <tr><td><code>profile.createdOn</code></td><td>object</td><td>来源机器的记录：主机名、系统版本、架构、winget 版本，方便区分不同电脑的清单。</td></tr>
+  <tr><td><code>profile.counts</code></td><td>object</td><td>勾选总数 / 可重装数 / 被跳过数，导入前用于核对。</td></tr>
+  <tr><td><code>packages[]</code></td><td>array</td><td>要安装的软件包；导入只认 <code>packageIdentifier</code>，其余字段用于显示与人工核对。</td></tr>
+  <tr><td><code>packages[].version</code></td><td>string</td><td>导出时的已装版本，仅记录，<strong>不锁定版本</strong>——导入装最新版。</td></tr>
+  <tr><td><code>packages[].source</code></td><td>string</td><td><code>winget</code> 或 <code>msstore</code>，决定走哪个源安装。</td></tr>
+  <tr><td><code>skippedPackages[]</code></td><td>array</td><td>勾选了但无法重装的应用（MSIX/UWP 或注册表安装），带跳过原因，不会被安装。</td></tr>
+</table>
+
+<div class="sec-title">四、导入时会做什么</div>
+<table class="doc">
+  <tr><th style="width:150px">步骤</th><th>说明</th></tr>
+  <tr><td>1. 读取校验</td><td>解析 JSON，支持上面两种格式以及纯数组 <code>[{"packageIdentifier": "..."}]</code>；过滤非法与重复 ID。</td></tr>
+  <tr><td>2. 落盘</td><td>把配置写到 <code>exports/imports/</code> 下并记录时间戳，便于回溯。</td></tr>
+  <tr><td>3. 执行安装</td><td>调用 <code>winget import -i 文件 --accept-package-agreements --accept-source-agreements</code>，逐行解析输出推送到界面。</td></tr>
+  <tr><td>4. 结果统计</td><td>分类统计「安装成功 / 已存在跳过 / 失败」，结束后自动重新扫描本机软件列表。</td></tr>
+</table>
+<div class="hint" style="margin-top:10px">提示：如果某个包在 winget 源里已下架，winget 会报「找不到与此 ID 匹配的包」，这类需要在 winget 官网搜索新 ID 后手动改配置。</div>
+`;
+
+/* ════════════ 启动 ════════════ */
+el("q").addEventListener("input", (event) => { state.q = event.target.value.trim(); render(); });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    ["maskExport", "maskImport", "maskHelp"].forEach(id => closeModal(id));
+  }
+});
+scan(false);
+</script>
+</body>
+</html>

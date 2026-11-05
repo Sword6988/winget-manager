@@ -1,0 +1,28 @@
+# ── 运行时产物 ──
+exports/
+logs/
+__pycache__/
+*.pyc
+*.log
+
+# ── 构建产物（体积大，可由 spec 重新生成）──
+build/
+dist/
+*.tmp
+
+# ── 历史归档中的二进制（保留源码，不保留旧 exe / 静态资源）──
+legacy/dist/
+
+# ── 设计与历史截图（保留 .md 规范，图片与旧 exe 不入库）──
+docs/*.png
+docs/*.exe
+
+# ── 本地临时文件 ──
+_c.txt
+_payload.json
+_imp.json
+_t.py
+_server.log
+
+# ── 真实环境变量（只提交 .env.example）──
+.env
