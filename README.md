@@ -5,6 +5,8 @@
 > **只做「导出」，不做「导入」。** 恢复由 `winget import` 或导出时生成的 `.bat` 完成，本工具不解析回读清单。
 > 2.14.0 起移除了历史上的「导入恢复」界面与相关代码（`services/jobs.py` 等约 550 行）。
 
+**📥 下载**：最新版单文件 exe 在 [Releases](https://github.com/Sword6988/winget-manager/releases/latest) 页面（`WingetManager.exe`，免安装，需 Windows 10 1809+ 与 winget）。
+
 ---
 
 ## 一、它解决什么问题
