@@ -102,9 +102,11 @@ class CatalogService:
     锁只保护 `_snapshot` 的读写，绝不在锁内跑 winget：一次扫描动辄几十秒，
     把锁跨在子进程外面会让「取消」和后续刷新全部堵死。
 
-    `runtime_cache` 是运行库元数据判定的磁盘缓存（可注入 None 关闭）：
-    isDependency 先查缓存（权威值），未命中退回关键词初判——后台富化线程
-    核查完写入缓存后，下一次扫描就自动用上。
+    `runtime_cache` 是运行库元数据核查的磁盘缓存（可注入 None 关闭）：
+    判定规则是「元数据仅肯定时覆盖」——缓存 True 表示元数据确认是运行库，
+    用于补上关键词漏判；缓存 False 只表示「已核查过、没有运行库信号」，
+    仅用于避免下一轮重复 show，**不构成否定**，不会把关键词已判为运行库的
+    包移出该组；缓存未命中就退回关键词初判，等后台富化线程核查后写入。
     """
 
     def __init__(self, config: Config, repository: WingetRepository,
@@ -148,6 +150,7 @@ class CatalogService:
                 continue
             key = raw.package_id.lower()
             cached_dep = self._cache.get(key) if self._cache is not None else None
+            keyword_dep = _is_dependency(raw)
             package = Package(
                 packageIdentifier=raw.package_id,
                 name=raw.name.strip() or raw.package_id,
@@ -156,9 +159,13 @@ class CatalogService:
                 source=raw.source,
                 idKind=_id_kind(raw.package_id),
                 reinstallable=_is_reinstallable(raw),
-                # 缓存是权威值；未命中才用关键词初判（后台富化会补齐缓存）
-                isDependency=(cached_dep if cached_dep is not None
-                              else _is_dependency(raw)),
+                # 元数据只补漏、不打假（产品裁定）：
+                # - 缓存 True  = 元数据认定是运行库 → 覆盖关键词，补上关键词漏掉的；
+                # - 缓存 False = 「已核查过，描述/标记里没有运行库信号」，仅用于
+                #   避免下一轮重复 show，**不构成否定**——关键词已判运行库的包
+                #   （如 UI.Xaml 这类描述里不写 runtime 的框架）不会被移出该组；
+                # - 缓存未命中 = 沿关键词初判，等待后台富化补齐。
+                isDependency=(True if cached_dep is True else keyword_dep),
             )
             # 同一 ID 可能有多行（x86/x64 组件），保留信息更全的一条
             previous = unique.get(key)
@@ -198,7 +205,11 @@ class CatalogService:
         return snapshot
 
     def pending_metadata_ids(self, snapshot: CatalogSnapshot) -> list[str]:
-        """值得发起 winget show 的包 ID：可重装 ∧ 缓存还没核查过。
+        """值得发起 winget show 的包 ID：可重装 ∧ 关键词判软件 ∧ 缓存未命中。
+
+        判定规则是「元数据仅肯定时覆盖」（见 _build_snapshot）：关键词已判
+        运行库的包不会被核查降级，所以不必为它们花一次 show；只查关键词
+        判「软件」且缓存里还没有核查记录的可重装包。
 
         供后台富化线程使用；顺序与快照一致，重复 ID 只取一次。
         """
@@ -207,7 +218,9 @@ class CatalogService:
         seen: set[str] = set()
         out: list[str] = []
         for pkg in snapshot.packages:
-            if not pkg.reinstallable:
+            # isDependency 为 True 的包：要么关键词判运行库，要么元数据已确认，
+            # 两种情况下 show 都不会改变分组 → 不必核查
+            if not pkg.reinstallable or pkg.isDependency:
                 continue
             key = pkg.packageIdentifier.lower()
             if key in seen or self._cache.get(key) is not None:

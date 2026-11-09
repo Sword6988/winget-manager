@@ -749,25 +749,68 @@ class SmokeTest(unittest.TestCase):
         broken.put("a.b", False)
         self.assertIs(RuntimeCache(path).get("a.b"), False)
 
-    def test_catalog_uses_runtime_cache_authoritatively(self) -> None:
-        """缓存是权威值：命中包不再走关键词初判。"""
-        cache = RuntimeCache(self.tmp / "mc-catalog.json")
-        cache.put("Git.Git", False)              # 元数据已核查：是软件
+    # 供 catalog 优先级用例使用的 winget list 表（字段间留 2+ 空格，与真实输出同构）
+    _LIST_HEADER = "名称    ID                     版本  源"
+
+    @classmethod
+    def _list_row(cls, name: str, pid: str, ver: str = "1.0",
+                  src: str = "winget") -> str:
+        return f"{name}    {pid}    {ver}    {src}"
+
+    def test_dependency_priority_metadata_only_overrides_when_true(self) -> None:
+        """判定优先级：元数据仅肯定时覆盖（只补漏、不打假）。
+
+        四组合：关键词 T + 缓存 T → T；关键词 T + 缓存 F → **T**（不降级）；
+        关键词 F + 缓存 T → T（补漏）；关键词 F + 缓存 F → F。
+        """
+        cache = RuntimeCache(self.tmp / "mc-priority.json")
+        cache.put("Vendor.VcRedist.AT", True)      # 关键词 T + 缓存 T
+        cache.put("Vendor.VcRedist.AF", False)     # 关键词 T + 缓存 F → 仍 T
+        cache.put("Vendor.App.CT", True)           # 关键词 F + 缓存 T → T
+        cache.put("Vendor.App.CF", False)          # 关键词 F + 缓存 F → F
 
         class FakeRepo:
             def list_installed(self, cancel=None):
                 return SimpleNamespace(
                     ok=True, returncode=0, stderr="",
-                    stdout="名称   ID          版本  源\n"
-                           "Git    Git.Git     1.0   winget\n")
+                    stdout="\n".join([
+                        SmokeTest._LIST_HEADER,
+                        SmokeTest._list_row("VcRed A", "Vendor.VcRedist.AT"),
+                        SmokeTest._list_row("VcRed B", "Vendor.VcRedist.AF"),
+                        SmokeTest._list_row("Plain A", "Vendor.App.CT"),
+                        SmokeTest._list_row("Plain B", "Vendor.App.CF"),
+                    ]) + "\n")
 
         svc = CatalogService(make_config(), FakeRepo(), runtime_cache=cache)
         snap = svc.get_catalog(force=True)
-        self.assertEqual(len(snap.packages), 1)
-        self.assertTrue(snap.packages[0].reinstallable)
-        self.assertIs(snap.packages[0].isDependency, False,
-                      "「Git」命中关键词，但缓存说它是软件：缓存说了算")
-        self.assertEqual(svc.pending_metadata_ids(snap), [], "已核查的包不再入队")
+        dep = {p.packageIdentifier: p.isDependency for p in snap.packages}
+        self.assertEqual(len(dep), 4, "四行都应解析出来")
+        self.assertIs(dep["Vendor.VcRedist.AT"], True, "关键词 T + 缓存 T → 运行库")
+        self.assertIs(dep["Vendor.VcRedist.AF"], True,
+                      "关键词 T + 缓存 F：元数据没命中信号，不得把已认定的运行库降级")
+        self.assertIs(dep["Vendor.App.CT"], True, "关键词 F + 缓存 T：补漏为运行库")
+        self.assertIs(dep["Vendor.App.CF"], False,
+                      "关键词 F + 缓存 F：确认为软件")
+
+    def test_pending_skips_keyword_dependencies(self) -> None:
+        """关键词已判运行库的包不必再核查（不会被降级），待核查只剩「判软件」的。"""
+        cache = RuntimeCache(self.tmp / "mc-pending-kw.json")
+        cache.put("Vendor.App.Done", False)        # 已核查过的软件：也要排除
+        pkgs = [
+            Package(packageIdentifier="Microsoft.UI.Xaml.2.8", name="UI.Xaml",
+                    reinstallable=True, isDependency=True),      # 关键词判运行库
+            Package(packageIdentifier="Microsoft.VSTOR", name="VS Tools",
+                    reinstallable=True, isDependency=False),     # 待核查
+            Package(packageIdentifier="Vendor.App.Done", name="已核查软件",
+                    reinstallable=True, isDependency=False),     # 缓存命中
+            Package(packageIdentifier="Vendor.Reg", name="注册表项",
+                    reinstallable=False, isDependency=False),    # 不可重装
+        ]
+        snap = CatalogSnapshot(generatedAt="x", durationMs=1, wingetVersion="v",
+                               machine={}, counts={}, packages=pkgs)
+        svc = CatalogService(make_config(), SimpleNamespace(), runtime_cache=cache)
+        self.assertEqual(svc.pending_metadata_ids(snap), ["Microsoft.VSTOR"],
+                         "只查「可重装 ∧ 关键词判软件 ∧ 缓存未命中」的包")
 
     def test_pending_metadata_ids_and_worker_skips_cached(self) -> None:
         cache = RuntimeCache(self.tmp / "mc-pending.json")
@@ -815,6 +858,16 @@ class SmokeTest(unittest.TestCase):
                          "每攒 5 个改判发一次信号，收尾时发剩余的，绝不逐条发")
         self.assertEqual(cache.get("Vendor.App0"), False)
 
+    @staticmethod
+    def _chip_texts(win) -> list[str]:
+        """顶部胶囊的可见文案（跳过末尾的弹性占位）。"""
+        out = []
+        for i in range(win.chips_lay.count()):
+            w = win.chips_lay.itemAt(i).widget()
+            if w is not None:
+                out.append(w.text())
+        return out
+
     def test_metadata_changes_apply_in_one_rebuild(self) -> None:
         win = self._spawn_window()
         try:
@@ -822,6 +875,9 @@ class SmokeTest(unittest.TestCase):
                                     reinstallable=True, source="winget")
                             for i in range(7)]
             win._pkg_index = {p.packageIdentifier.lower(): p for p in win.packages}
+            win.state = "READY"
+            win._rebuild_chips()                    # 改判前：只有「软件」组
+            self.assertEqual(self._chip_texts(win), ["全部 7", "软件 7"])
             counter: list = []
             orig = win._rebuild_list
 
@@ -836,6 +892,9 @@ class SmokeTest(unittest.TestCase):
             self.assertEqual(counter, [1], "一批 7 个改判只重建一次列表")
             self.assertTrue(all(p.isDependency for p in win.packages),
                             "整批改判都要落到 Package 上")
+            # 胶囊计数也必须跟着刷新（否则「运行库」胶囊不出现，计数还是旧的）
+            self.assertEqual(self._chip_texts(win), ["全部 7", "运行库 7"],
+                             "改判后顶部胶囊要即时刷新")
         finally:
             self._drop_window(win)
 
@@ -896,12 +955,12 @@ class SmokeTest(unittest.TestCase):
             # worker1 被取消时，进行中的 show 有两种收场：恰好在取消后完成
             # （结果仍落缓存），或被 run() 的取消轮询 kill 掉（fetch 抛
             # ScanCancelled，不落缓存）——后者下一轮富化会重试一次。两种
-            # 路径每个 ID 最多 show 2 次；最终缓存必须有权威值，第三轮
+            # 路径每个 ID 最多 show 2 次；最终缓存必须有核查结果，第三轮
             # 不会再 show。
             self.assertLessEqual(len(repo.show_calls), 2,
                                  "每个 ID 最多 show 两次（取消重试也算）")
             self.assertEqual(win.runtime_cache.get("microsoft.vstor"), True,
-                             "核查结果最终应落缓存（权威值）")
+                             "核查结果最终应落缓存")
         finally:
             self._drop_window(win)
 

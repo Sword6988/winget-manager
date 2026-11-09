@@ -110,8 +110,10 @@ class MetadataWorker(QThread):
     - 每次 show 前若扫描在跑（scan_active Event 置位）就挂起让路；
     - 新扫描启动时整条线程被取消（request_cancel），进行中的 show 会在
       0.2s 内被 run() 的取消轮询 kill 掉，没查完的 ID 下轮扫描重新入队；
-    - 结果写入 RuntimeCache（权威值），每次 show 前再查一遍缓存，
-      被取消前的成果不会白费，也不会与新一轮富化重复 show。
+    - 结果写入 RuntimeCache：True = 元数据确认是运行库（补漏，会覆盖关键词）；
+      False = 已核查、描述标记里没有运行库信号（只用于避免重复 show，
+      **不是否定**，不会把关键词已认定的运行库移出该组）。每次 show 前再
+      查一遍缓存，被取消前的成果不会白费，也不会与新一轮富化重复 show。
 
     信号按批回报（每攒 5 个改判发一次），主线程一批只重建一次列表；
     绝不逐条刷界面。
@@ -194,7 +196,7 @@ class MainWindow(QMainWindow):
     def __init__(self, cfg: Config) -> None:
         super().__init__()
         self.cfg = cfg
-        # 运行库元数据缓存（权威判定值）：扫描建快照与后台富化线程共用一份
+        # 运行库元数据核查缓存：扫描建快照与后台富化线程共用一份（True 补漏，False 仅防重复查）
         self.runtime_cache = RuntimeCache(METADATA_CACHE_FILE)
         self.repo = WingetRepository(cfg)
         self.catalog = CatalogService(cfg, self.repo, runtime_cache=self.runtime_cache)
@@ -1154,6 +1156,8 @@ class MainWindow(QMainWindow):
         # 一批只重建一次：逐条重建是 119ms × N，会卡死界面
         self._rebuild_list()
         self._update_status()
+        # 顶部胶囊的计数也变了（改判会新增/改名分组），与扫描完成路径保持一致
+        self._rebuild_chips()
         for item in batch:
             pkg = self._pkg_index.get(str(item["id"]).lower())
             if pkg is None:
