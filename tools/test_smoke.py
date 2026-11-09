@@ -37,6 +37,8 @@ from core.errors import BadRequest, ScanCancelled, WingetNotFound  # noqa: E402
 from core.fsio import atomic_write_json  # noqa: E402
 from services.catalog import (CatalogService, CatalogSnapshot, Package,  # noqa: E402
                               RawPackage, _is_reinstallable)
+from services.metadata import (RuntimeCache, analyze_runtime_signal,  # noqa: E402
+                               parse_runtime_signal)
 from services.profiles import build_restore_bat, build_winget_manifest  # noqa: E402
 from services.winget_cli import WingetRepository, _decode  # noqa: E402
 
@@ -45,6 +47,37 @@ _ORIG_START_SCAN = None
 
 # winget 进程级全局互斥冲突时的退出码
 _MUTEX_RC = 0x8A150001
+
+# ── winget show 输出样例（元数据判定运行库） ──
+# Microsoft.VSTOR：描述含 runtime / required to run，安装器 URL 是 redist
+_SHOW_VSTOR_ZH = (
+    "找到 Microsoft.VSTOR\r\n"
+    "版本: 10.0.60830\r\n"
+    "发布程序: Microsoft Corporation\r\n"
+    "描述: 安装 Microsoft Visual Studio 2010 Tools for Office Runtime，\r\n"
+    "  which is required to run Microsoft Office solutions.\r\n"
+    "标记:\r\n"
+    "  office\r\n"
+    "安装程序 URL: https://download.microsoft.com/download/vstor_redist.exe\r\n"
+)
+# Rustup：标记只有 rust/rustlang，描述无信号词
+_SHOW_RUSTUP = (
+    "找到 Rustup\r\n"
+    "版本: 1.27.0\r\n"
+    "描述: Rust 工具链安装与管理器。\r\n"
+    "标记:\r\n"
+    "  rust\r\n"
+    "  rustlang\r\n"
+)
+# Windows SDK：英文段落标签，无信号词
+_SHOW_SDK_EN = (
+    "Found Windows SDK\r\n"
+    "Version: 10.0.22621\r\n"
+    "Description: Windows SDK provides headers, libraries and tools.\r\n"
+    "Tags:\r\n"
+    "  sdk\r\n"
+    "  windows\r\n"
+)
 
 
 class _FakeProc:
@@ -110,10 +143,11 @@ class SmokeTest(unittest.TestCase):
         cls.settings_dir = tempfile.mkdtemp(prefix="wpm-settings-")
         QSettings.setDefaultFormat(QSettings.IniFormat)
         QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, cls.settings_dir)
-        # 勾选状态落到临时目录，别碰真实的 %LOCALAPPDATA%
+        # 勾选状态与元数据缓存都落到临时目录，别碰真实的 %LOCALAPPDATA%
         cls._patches = [
             mock.patch("qt_app.SELECTION_FILE", cls.tmp / "selection.json"),
             mock.patch("qt_app.PERSIST_DIR", cls.tmp),
+            mock.patch("qt_app.METADATA_CACHE_FILE", cls.tmp / "metadata-cache.json"),
         ]
         for p in cls._patches:
             p.start()
@@ -152,6 +186,16 @@ class SmokeTest(unittest.TestCase):
         win.close()
         win.deleteLater()
         self.app.processEvents()
+
+    def _wait_until(self, predicate, timeout_s: float = 6.0) -> bool:
+        """轮询等异步（QThread 信号跨线程投递后要靠 processEvents 才进槽）。"""
+        deadline = time.perf_counter() + timeout_s
+        while time.perf_counter() < deadline:
+            self.app.processEvents()
+            if predicate():
+                return True
+            time.sleep(0.02)
+        return False
 
     # ── 导出清单 ──
     def test_manifest_structure(self) -> None:
@@ -657,6 +701,209 @@ class SmokeTest(unittest.TestCase):
 
         self.assertEqual(seen["missing"], 1, "WingetNotFound 才走安装引导")
         self.assertEqual(seen["ok"], 0)
+
+    # ── 元数据自动判定运行库 ──
+    def test_parse_runtime_signal(self) -> None:
+        # VSTOR：描述含 runtime / required to run，安装器 URL 是 redist → True
+        self.assertIs(parse_runtime_signal(_SHOW_VSTOR_ZH), True)
+        dep, word = analyze_runtime_signal(_SHOW_VSTOR_ZH)
+        self.assertIs(dep, True)
+        self.assertEqual(word, "runtime", "应报出第一个命中的信号词")
+        # Rustup：标记只有 rust/rustlang → False（不是「未知」）
+        self.assertIs(parse_runtime_signal(_SHOW_RUSTUP), False)
+        # Windows SDK：英文标签、无信号词 → False
+        self.assertIs(parse_runtime_signal(_SHOW_SDK_EN), False)
+        # 空输出 / 只有一句话没有描述标记段落 → None（未知，不当成 False）
+        self.assertIsNone(parse_runtime_signal(""))
+        self.assertIsNone(parse_runtime_signal("   \r\n"))
+        self.assertIsNone(parse_runtime_signal("找不到满足条件的包"))
+        # 英文段落 + 全角冒号都能解析
+        en = "Description: Visual C++ redistributable for Visual Studio\r\nTags:\r\n  cpp\r\n"
+        self.assertIs(parse_runtime_signal(en), True)
+        zh_full = "描述：此组件是 Visual C++ 可再发行组件（redistributable）。"
+        self.assertIs(parse_runtime_signal(zh_full), True)
+        # 标记多行缩进列表 + 描述折行都不丢内容
+        multi = ("描述: 用于运行游戏的第一方运行时组件，\r\n"
+                 "  与游戏本体分开安装。\r\n"
+                 "标记:\r\n"
+                 "  game\r\n"
+                 "  driver\r\n")
+        self.assertIs(parse_runtime_signal(multi), True, "折行描述里的信号词也应命中")
+
+    def test_runtime_cache_roundtrip_and_corruption(self) -> None:
+        path = self.tmp / "mc-roundtrip.json"
+        cache = RuntimeCache(path)
+        self.assertIsNone(cache.get("Microsoft.VSTOR"), "空缓存应返回未知")
+        cache.put("Microsoft.VSTOR", True)
+        self.assertIs(cache.get("microsoft.vstor"), True, "ID 大小写不敏感")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(data["schema"], 1)
+        self.assertIs(data["entries"]["microsoft.vstor"]["dep"], True)
+        self.assertIn("checkedAt", data["entries"]["microsoft.vstor"])
+        # 新实例读同一份文件
+        self.assertIs(RuntimeCache(path).get("Microsoft.VSTOR"), True)
+        # 半截 JSON：回退空缓存，put 重建合法文件
+        path.write_text('{"schema": 1, "entries": {"x": tr', encoding="utf-8")
+        broken = RuntimeCache(path)
+        self.assertIsNone(broken.get("microsoft.vstor"))
+        broken.put("a.b", False)
+        self.assertIs(RuntimeCache(path).get("a.b"), False)
+
+    def test_catalog_uses_runtime_cache_authoritatively(self) -> None:
+        """缓存是权威值：命中包不再走关键词初判。"""
+        cache = RuntimeCache(self.tmp / "mc-catalog.json")
+        cache.put("Git.Git", False)              # 元数据已核查：是软件
+
+        class FakeRepo:
+            def list_installed(self, cancel=None):
+                return SimpleNamespace(
+                    ok=True, returncode=0, stderr="",
+                    stdout="名称   ID          版本  源\n"
+                           "Git    Git.Git     1.0   winget\n")
+
+        svc = CatalogService(make_config(), FakeRepo(), runtime_cache=cache)
+        snap = svc.get_catalog(force=True)
+        self.assertEqual(len(snap.packages), 1)
+        self.assertTrue(snap.packages[0].reinstallable)
+        self.assertIs(snap.packages[0].isDependency, False,
+                      "「Git」命中关键词，但缓存说它是软件：缓存说了算")
+        self.assertEqual(svc.pending_metadata_ids(snap), [], "已核查的包不再入队")
+
+    def test_pending_metadata_ids_and_worker_skips_cached(self) -> None:
+        cache = RuntimeCache(self.tmp / "mc-pending.json")
+        cache.put("Git.Git", False)
+        pkgs = [
+            Package(packageIdentifier="Git.Git", name="Git", reinstallable=True),
+            Package(packageIdentifier="Microsoft.VSTOR", name="VS Tools",
+                    reinstallable=True),
+            Package(packageIdentifier="Vendor.Reg", name="注册表项", reinstallable=False),
+        ]
+        snap = CatalogSnapshot(generatedAt="x", durationMs=1, wingetVersion="v",
+                               machine={}, counts={}, packages=pkgs)
+        svc = CatalogService(make_config(), SimpleNamespace(), runtime_cache=cache)
+        self.assertEqual(svc.pending_metadata_ids(snap), ["Microsoft.VSTOR"],
+                         "只入队「可重装 ∧ 未核查」，不可重装与已核查的都排除")
+
+        calls: list = []
+
+        class ShowRepo:
+            def show_metadata(self, package_id, cancel=None):
+                calls.append(package_id)
+                return SimpleNamespace(ok=True, stdout=_SHOW_VSTOR_ZH)
+
+        worker = Q.MetadataWorker(ShowRepo(), cache, list(svc.pending_metadata_ids(snap)),
+                                  names={}, keyword_deps={}, scan_active=None)
+        worker.run()                              # 同步执行，不起线程
+        self.assertEqual([c.lower() for c in calls], ["microsoft.vstor"],
+                         "缓存命中的 ID 不应再发起 winget show")
+        self.assertIs(cache.get("Microsoft.VSTOR"), True, "核查结果要写回缓存")
+
+    def test_worker_batches_changes(self) -> None:
+        emissions: list = []
+
+        class ShowRepo:
+            def show_metadata(self, package_id, cancel=None):
+                return SimpleNamespace(ok=True, stdout=_SHOW_SDK_EN)   # 判 False
+
+        cache = RuntimeCache(self.tmp / "mc-batch.json")
+        worker = Q.MetadataWorker(ShowRepo(), cache,
+                                  [f"Vendor.App{i}" for i in range(7)],
+                                  names={}, keyword_deps={}, scan_active=None)
+        worker.changes.connect(emissions.append)
+        worker.run()
+        self.assertEqual([len(b) for b in emissions], [5, 2],
+                         "每攒 5 个改判发一次信号，收尾时发剩余的，绝不逐条发")
+        self.assertEqual(cache.get("Vendor.App0"), False)
+
+    def test_metadata_changes_apply_in_one_rebuild(self) -> None:
+        win = self._spawn_window()
+        try:
+            win.packages = [Package(packageIdentifier=f"Vendor.App{i}", name=f"应用 {i}",
+                                    reinstallable=True, source="winget")
+                            for i in range(7)]
+            win._pkg_index = {p.packageIdentifier.lower(): p for p in win.packages}
+            counter: list = []
+            orig = win._rebuild_list
+
+            def counting(*args, **kwargs):
+                counter.append(1)
+                return orig(*args, **kwargs)
+
+            win._rebuild_list = counting
+            batch = [{"id": p.packageIdentifier, "dep": True, "signal": "runtime",
+                      "name": p.name} for p in win.packages]
+            win._on_metadata_changes(batch)
+            self.assertEqual(counter, [1], "一批 7 个改判只重建一次列表")
+            self.assertTrue(all(p.isDependency for p in win.packages),
+                            "整批改判都要落到 Package 上")
+        finally:
+            self._drop_window(win)
+
+    def test_enrichment_canceled_on_rescan(self) -> None:
+        """富化进行中用户重扫：富化被取消收尾、新扫描正常完成、结果靠缓存续上。"""
+
+        class FakeScanRepo:
+            def __init__(self) -> None:
+                self.show_calls: list = []
+                self.slow = False
+
+            def version(self, cancel=None):
+                return "1.0"
+
+            def list_installed(self, cancel=None):
+                return SimpleNamespace(
+                    ok=True, returncode=0, stderr="",
+                    stdout="名称                 ID                版本  源\n"
+                           "Visual Studio Tools  Microsoft.VSTOR   1.0   winget\n")
+
+            def show_metadata(self, package_id, cancel=None):
+                self.show_calls.append(package_id)
+                if self.slow:
+                    time.sleep(0.5)        # 留出「富化进行中」的时间窗
+                return SimpleNamespace(ok=True, stdout=_SHOW_VSTOR_ZH)
+
+        repo = FakeScanRepo()
+        repo.slow = True
+        with mock.patch("qt_app.METADATA_CACHE_FILE",
+                        self.tmp / "mc-rescan.json"):
+            win = self._spawn_window()
+        try:
+            win.repo = repo
+            win.catalog = CatalogService(make_config(), repo,
+                                         runtime_cache=win.runtime_cache)
+            _ORIG_START_SCAN(win)                      # 第一轮扫描（真实实现）
+            self.assertTrue(self._wait_until(lambda: win.state == "READY", 8),
+                            "扫描应正常完成")
+            self.assertTrue(self._wait_until(lambda: bool(win._enrich_workers), 3),
+                            "扫描完成后应自动开始元数据核查")
+            self.assertTrue(self._wait_until(lambda: len(repo.show_calls) >= 1, 3),
+                            "富化线程应开始 winget show")
+
+            _ORIG_START_SCAN(win)                      # 用户在富化进行中重扫
+            worker1 = next(iter(win._enrich_workers)) if win._enrich_workers else None
+            self.assertIsNotNone(worker1, "重扫时应还有富化线程在收尾")
+            self.assertTrue(self._wait_until(lambda: worker1.isFinished(), 6),
+                            "富化线程应被取消并尽快收尾")
+            self.assertTrue(worker1._cancel.is_set(), "取消标志应已置位")
+
+            self.assertTrue(self._wait_until(lambda: win.state == "READY", 10),
+                            "新扫描应正常完成")
+            self.assertFalse(win._scan_gate.is_set(), "扫描收尾后应放开 winget")
+            self.assertTrue(self._wait_until(
+                lambda: win._pkg_index.get("microsoft.vstor") is not None
+                and win._pkg_index["microsoft.vstor"].isDependency, 10),
+                "富化续上后 VSTOR 应被元数据改判进「运行库」")
+            # worker1 被取消时，进行中的 show 有两种收场：恰好在取消后完成
+            # （结果仍落缓存），或被 run() 的取消轮询 kill 掉（fetch 抛
+            # ScanCancelled，不落缓存）——后者下一轮富化会重试一次。两种
+            # 路径每个 ID 最多 show 2 次；最终缓存必须有权威值，第三轮
+            # 不会再 show。
+            self.assertLessEqual(len(repo.show_calls), 2,
+                                 "每个 ID 最多 show 两次（取消重试也算）")
+            self.assertEqual(win.runtime_cache.get("microsoft.vstor"), True,
+                             "核查结果最终应落缓存（权威值）")
+        finally:
+            self._drop_window(win)
 
     # ── 缓存命中不再重复构建 ──
     def test_catalog_cache_avoids_second_build(self) -> None:

@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from core.config import Config
 from core.errors import ScanCancelled
 from core.logging_setup import get_logger
+from services.metadata import RuntimeCache
 from services.winget_cli import WingetRepository
 from services.winget_table import RawPackage, parse_list_output
 
@@ -100,11 +101,17 @@ class CatalogService:
 
     锁只保护 `_snapshot` 的读写，绝不在锁内跑 winget：一次扫描动辄几十秒，
     把锁跨在子进程外面会让「取消」和后续刷新全部堵死。
+
+    `runtime_cache` 是运行库元数据判定的磁盘缓存（可注入 None 关闭）：
+    isDependency 先查缓存（权威值），未命中退回关键词初判——后台富化线程
+    核查完写入缓存后，下一次扫描就自动用上。
     """
 
-    def __init__(self, config: Config, repository: WingetRepository):
+    def __init__(self, config: Config, repository: WingetRepository,
+                 runtime_cache: RuntimeCache | None = None):
         self._config = config
         self._repo = repository
+        self._cache = runtime_cache
         self._lock = threading.Lock()
         self._snapshot: CatalogSnapshot | None = None
         self._snapshot_at = 0.0
@@ -140,6 +147,7 @@ class CatalogService:
             if not raw.package_id:
                 continue
             key = raw.package_id.lower()
+            cached_dep = self._cache.get(key) if self._cache is not None else None
             package = Package(
                 packageIdentifier=raw.package_id,
                 name=raw.name.strip() or raw.package_id,
@@ -148,7 +156,9 @@ class CatalogService:
                 source=raw.source,
                 idKind=_id_kind(raw.package_id),
                 reinstallable=_is_reinstallable(raw),
-                isDependency=_is_dependency(raw),
+                # 缓存是权威值；未命中才用关键词初判（后台富化会补齐缓存）
+                isDependency=(cached_dep if cached_dep is not None
+                              else _is_dependency(raw)),
             )
             # 同一 ID 可能有多行（x86/x64 组件），保留信息更全的一条
             previous = unique.get(key)
@@ -186,3 +196,22 @@ class CatalogService:
             duration_ms,
         )
         return snapshot
+
+    def pending_metadata_ids(self, snapshot: CatalogSnapshot) -> list[str]:
+        """值得发起 winget show 的包 ID：可重装 ∧ 缓存还没核查过。
+
+        供后台富化线程使用；顺序与快照一致，重复 ID 只取一次。
+        """
+        if self._cache is None:
+            return []
+        seen: set[str] = set()
+        out: list[str] = []
+        for pkg in snapshot.packages:
+            if not pkg.reinstallable:
+                continue
+            key = pkg.packageIdentifier.lower()
+            if key in seen or self._cache.get(key) is not None:
+                continue
+            seen.add(key)
+            out.append(pkg.packageIdentifier)
+        return out

@@ -232,3 +232,18 @@ class WingetRepository:
         if not result.ok and not result.stdout.strip():
             raise WingetCommandFailed(result.combined.strip() or "winget list 无输出")
         return result
+
+    def show_metadata(self, package_id: str,
+                      cancel: threading.Event | None = None) -> CommandResult:
+        """单个包的 winget show 原始输出：给元数据富化用。
+
+        走 run() 自带的互斥重试。包不在目录里时 winget 以非 0 退出并在
+        stderr 里带原因——这里不抛错，把原始结果交给上层解析
+        （解析不出描述/标记就按「未知」处理，不写缓存）。
+        """
+        return self.run(
+            ["show", "--id", package_id, "--exact",
+             "--accept-source-agreements", "--disable-interactivity"],
+            timeout=30,
+            cancel=cancel,
+        )

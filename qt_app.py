@@ -40,6 +40,8 @@ from qt_ui import AboutDialog, ClickableLabel, ExportDialog, GradientLabel, Pack
 from core.config import load_config  # noqa: E402
 from core.errors import ScanCancelled, WingetNotFound  # noqa: E402
 from core.fsio import atomic_write_json  # noqa: E402
+from services.metadata import (RuntimeCache, analyze_runtime_signal,  # noqa: E402
+                               fetch_show_output)
 from services.profiles import build_winget_manifest  # noqa: E402
 from services.winget_cli import WingetRepository  # noqa: E402
 
@@ -101,6 +103,90 @@ class ScanWorker(QThread):
                 self.err.emit(str(exc))
 
 
+class MetadataWorker(QThread):
+    """后台元数据富化：逐个 winget show，解析运行库信号，批量回报。
+
+    与扫描共用唯一的 winget 入口，协调方式（见 MainWindow._scan_gate）：
+    - 每次 show 前若扫描在跑（scan_active Event 置位）就挂起让路；
+    - 新扫描启动时整条线程被取消（request_cancel），进行中的 show 会在
+      0.2s 内被 run() 的取消轮询 kill 掉，没查完的 ID 下轮扫描重新入队；
+    - 结果写入 RuntimeCache（权威值），每次 show 前再查一遍缓存，
+      被取消前的成果不会白费，也不会与新一轮富化重复 show。
+
+    信号按批回报（每攒 5 个改判发一次），主线程一批只重建一次列表；
+    绝不逐条刷界面。
+    """
+
+    changes = Signal(object)   # list[dict]：{"id", "name", "dep", "signal"}
+    done = Signal(object)      # {"checked", "promoted", "kept", "failed", "canceled"}
+
+    BATCH_SIZE = 5
+
+    def __init__(self, repo, cache: RuntimeCache, pending_ids: list[str],
+                 names: dict, keyword_deps: dict,
+                 scan_active: threading.Event | None = None) -> None:
+        super().__init__()
+        self._repo = repo
+        self._cache = cache
+        self._pending = list(pending_ids)
+        self._names = dict(names or {})
+        self._keyword_deps = dict(keyword_deps or {})
+        self._scan_active = scan_active
+        self._cancel = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel.set()
+
+    def _wait_for_scan(self) -> bool:
+        """扫描进行中就挂起让路；返回 False 表示线程该收工（被取消）。"""
+        while self._scan_active is not None and self._scan_active.is_set():
+            if self._cancel.is_set():
+                return False
+            self._scan_active.wait(0.2)    # 周期醒来查看取消标志
+        return not self._cancel.is_set()
+
+    def run(self) -> None:
+        checked = promoted = kept = failed = 0
+        batch: list[dict] = []
+
+        def flush() -> None:
+            nonlocal batch
+            if batch:
+                self.changes.emit(batch)
+                batch = []
+
+        try:
+            for pid in self._pending:
+                if not self._wait_for_scan():
+                    break
+                if self._cache.get(pid) is not None:
+                    continue            # 别的轮次已核查过：跳过，不再发起 show
+                try:
+                    text = fetch_show_output(self._repo, pid, cancel=self._cancel)
+                except ScanCancelled:
+                    break
+                checked += 1
+                dep, signal_word = analyze_runtime_signal(text)
+                if dep is None:
+                    failed += 1         # 查询失败/解析不出：不写缓存，下次再试
+                    continue
+                self._cache.put(pid, dep)
+                if dep:
+                    promoted += 1
+                else:
+                    kept += 1
+                if dep != self._keyword_deps.get(pid.lower()):
+                    # 只报「改判」：与关键词初判一致的不用打扰用户
+                    batch.append({"id": pid, "dep": dep, "signal": signal_word,
+                                  "name": self._names.get(pid, pid)})
+                    if len(batch) >= self.BATCH_SIZE:
+                        flush()
+        finally:
+            flush()
+            self.done.emit({"checked": checked, "promoted": promoted, "kept": kept,
+                            "failed": failed, "canceled": self._cancel.is_set()})
+
+
 # ══════════════════════════ 导出对话框 ══════════════════════════
 class MainWindow(QMainWindow):
     EDGE = 7
@@ -108,10 +194,13 @@ class MainWindow(QMainWindow):
     def __init__(self, cfg: Config) -> None:
         super().__init__()
         self.cfg = cfg
+        # 运行库元数据缓存（权威判定值）：扫描建快照与后台富化线程共用一份
+        self.runtime_cache = RuntimeCache(METADATA_CACHE_FILE)
         self.repo = WingetRepository(cfg)
-        self.catalog = CatalogService(cfg, self.repo)
+        self.catalog = CatalogService(cfg, self.repo, runtime_cache=self.runtime_cache)
         self.snapshot = None
         self.packages: list = []
+        self._pkg_index: dict = {}       # id 小写 → Package，供富化结果回写
         self.checked: dict = {}
         self.rows: dict = {}
         self.sections: list = []
@@ -124,6 +213,11 @@ class MainWindow(QMainWindow):
         # Qt 会直接 qFatal 掉进程（exit 127，没有 traceback）。取消/关闭时也只是
         # 「放弃结果」，线程本身归这个集合管到 finished 为止。
         self._workers: set = set()
+        # 元数据富化线程单独管：不进 self._workers——那会让「有线程在跑」的
+        # 重扫闸门把 F5 挡住；新扫描启动时会先取消富化线程（见 _start_scan）。
+        self._enrich_workers: set = set()
+        # winget 占用协调：扫描进行中置位，富化线程每次 show 前查看并让路
+        self._scan_gate = threading.Event()
         self._scan_t0 = 0.0
         self._maximized = False
         self._normal_geo = None
@@ -908,6 +1002,10 @@ class MainWindow(QMainWindow):
             # 上一轮已取消但线程还在收尾：再起一轮会让两份结果抢同一个 _scan_worker
             self._flash("上一轮扫描仍在收尾，请稍候")
             return
+        # 新扫描要独占 winget：先取消富化线程（进行中的 show 会被 0.2s 内 kill，
+        # 已入缓存的结果保留，没查完的 ID 新扫描结束后会重新入队）
+        self._cancel_enrichment()
+        self._scan_gate.set()          # 富化线程见到置位就挂起让路
         self._set_state("SCANNING")
         self.progress.start()
         self._scan_t0 = time.perf_counter()
@@ -938,6 +1036,8 @@ class MainWindow(QMainWindow):
         self._workers.discard(w)
         if self._scan_worker is w:
             self._scan_worker = None
+            # 扫描彻底收尾：放开 winget，等着的富化线程继续跑
+            self._scan_gate.clear()
         w.deleteLater()
         if self.state == "SCANNING" and not self._workers:
             # 线程异常退出且一个信号都没发（比如 run() 里抛了非 Exception），
@@ -970,6 +1070,7 @@ class MainWindow(QMainWindow):
         self.progress.stop()
         self.snapshot = snapshot
         self.packages = list(snapshot.packages)
+        self._pkg_index = {p.packageIdentifier.lower(): p for p in self.packages}
         n_re = sum(1 for p in self.packages if p.reinstallable)
         n_dep = sum(1 for p in self.packages if p.reinstallable and p.isDependency)
         self.log_append("info",
@@ -999,6 +1100,83 @@ class MainWindow(QMainWindow):
         self._rebuild_list(keep_scroll=True)   # 重扫后保持滚动位置
         self._set_state("READY")
         self._save_selection()
+        # 关键词初判只认识熟面孔：剩下的交后台用 winget 目录元数据核查
+        self._start_metadata_enrichment(snapshot)
+
+    # ── 元数据富化 ──
+    def _start_metadata_enrichment(self, snapshot) -> None:
+        """对「可装 ∧ 缓存未核查」的包起后台线程做 winget show 核查。
+
+        线程归 self._enrich_workers 管（不进 self._workers，否则重扫闸门
+        会把 F5 挡住）；新扫描启动时会先取消它。
+        """
+        if not hasattr(self, "repo") or self.repo is None:
+            return
+        pending = self.catalog.pending_metadata_ids(snapshot)
+        if not pending:
+            return
+        names = {p.packageIdentifier: p.name for p in self.packages}
+        keyword_deps = {p.packageIdentifier.lower(): bool(p.isDependency)
+                        for p in self.packages}
+        worker = MetadataWorker(self.repo, self.runtime_cache, pending, names,
+                                keyword_deps, self._scan_gate)
+        self._enrich_workers.add(worker)
+        worker.changes.connect(self._on_metadata_changes)
+        worker.done.connect(self._on_metadata_done)
+        worker.finished.connect(self._on_enrich_finished)
+        self.log_append("info",
+                        f"元数据核查：{len(pending)} 个新包待核查"
+                        f"（后台进行，不占用界面，结果本地缓存）")
+        worker.start()
+
+    def _cancel_enrichment(self) -> None:
+        for w in list(self._enrich_workers):
+            w.request_cancel()
+
+    def _on_enrich_finished(self, w=None) -> None:
+        w = w or self.sender()
+        if w is None:
+            return
+        self._enrich_workers.discard(w)
+        w.deleteLater()
+
+    def _on_metadata_changes(self, batch) -> None:
+        """应用一批改判：先全部落到 Package，再一次性重建列表。"""
+        applied = 0
+        for item in batch:
+            pkg = self._pkg_index.get(str(item["id"]).lower())
+            if pkg is None:
+                continue                     # 重扫后该包已不在列表里
+            pkg.isDependency = bool(item["dep"])
+            applied += 1
+        if not applied:
+            return
+        # 一批只重建一次：逐条重建是 119ms × N，会卡死界面
+        self._rebuild_list()
+        self._update_status()
+        for item in batch:
+            pkg = self._pkg_index.get(str(item["id"]).lower())
+            if pkg is None:
+                continue
+            to = DEPENDENCY_GROUP if item["dep"] else SOFTWARE_GROUP
+            reason = (f"描述/标记命中「{item['signal']}」" if item.get("signal")
+                      else "描述/标记未见运行库信号")
+            self.log_append("info" if item["dep"] else "skip",
+                            f"元数据核查：{pkg.name} → 归入「{to}」（{reason}）")
+
+    def _on_metadata_done(self, summary: dict) -> None:
+        if summary.get("canceled"):
+            self.log_append("skip",
+                            "元数据核查被新扫描打断：已核查 "
+                            f"{summary['checked']} 个（其中改判 "
+                            f"{summary['promoted'] + summary['kept']} 个），"
+                            "未查完的下次扫描自动续上。")
+            return
+        self.log_append(
+            "info",
+            f"元数据核查完成：{summary['checked']} 个新包，"
+            f"{summary['promoted']} 个归入运行库，{summary['kept']} 个确认为软件，"
+            f"{summary['failed']} 个暂无法判定（下次扫描自动重试）。")
 
     def _on_scan_err(self, msg: str) -> None:
         if self.sender() is not self._scan_worker:
@@ -1559,10 +1737,14 @@ class MainWindow(QMainWindow):
         self._flush_selection()
         self._save_window_state()
         # 窗口先别急着关：线程还活着时进程退出会撞上 QThread 析构，直接 qFatal
+        self._cancel_enrichment()
         for w in list(self._workers):
             w.request_cancel()
             if not w.wait(3000):
                 logging.getLogger("scan").warning("扫描线程 3s 内未退出，放弃等待")
+        for w in list(self._enrich_workers):
+            if not w.wait(3000):
+                logging.getLogger("scan").warning("元数据线程 3s 内未退出，放弃等待")
         e.accept()
 
 
