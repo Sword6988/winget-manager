@@ -1,0 +1,10 @@
+名称                                    ID                                          版本          可用          源
+------------------------------------------------------------------------------------------------------------------
+Google Chrome                           Google.Chrome                               131.0.6778.86 131.0.6778.86 winget
+火绒安全软件                            Huorong.Huorong                             6.0.4.2                     winget
+Microsoft Visual C++ 2015-2022 x64      Microsoft.VCRedist.2015+.x64                14.40.33810   14.42.34438   winget
+Microsoft.WindowsStore                  Microsoft.WindowsStore_8wekyb3d8bbwe        2.3.0.0                     msstore
+7-Zip 24.09 (x64)                       7zip.7zip                                   24.09                       winget
+注册表安装项                            Vendor.Registry.Tool                        3.0.1         
+
+已找到 6 个已安装的程序包。

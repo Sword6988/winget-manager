@@ -1,0 +1,4 @@
+Name                                    Id                                          Version       Available     Source
+----------------------------------------------------------------------------------------------------------------------
+Git                                     Git.Git                                     2.47.1        2.47.1        winget
+Everything                              voidtools.Everything                        1.4.1.1026                  winget
