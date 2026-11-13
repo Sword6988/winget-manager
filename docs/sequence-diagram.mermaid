@@ -1,0 +1,64 @@
+sequenceDiagram
+    autonumber
+    participant VM as MainViewModel (UI 线程)
+    participant Cat as CatalogService (Core)
+    participant Repo as WingetRepository
+    participant WP as winget.exe 子进程
+    participant TP as TableParser
+    participant RC as RuntimeCache
+    participant EW as EnrichmentWorker (后台 Task)
+    participant UI as ListView/CollectionViewSource
+
+    VM->>VM: RescanOrCancelCommand（空闲态=开始扫描）
+    VM->>EW: CancelAsync()（上一轮富化让路，未查完的缓存外 ID 下轮续查）
+    VM->>VM: Cts = new CancellationTokenSource()
+    VM->>VM: IsScanning=true，ProgressBar=indeterminate，状态「已用 x.xs · 可取消」
+    VM->>Cat: BuildSnapshotAsync(ct)（Task.Run 后台）
+    Note over Cat: AppConfig.WingetExe 为空 → 直接返回 missing 信号，UI 切引导页
+
+    Cat->>Repo: GetVersionAsync(ct)（30s 超时；空输出→"unknown"，不中止）
+    Repo->>WP: winget --version
+    WP-->>Repo: v1.x（或互斥空输出→Repo 内部退避重试 ×2）
+    Repo-->>Cat: "1.x" / "unknown"
+
+    Cat->>Repo: ListInstalledAsync(ct)
+    loop Process 轮询（200ms）
+        Repo->>WP: winget list --accept-source-agreements --disable-interactivity
+        Repo->>Repo: 检查 ct.IsCancellationRequested
+        alt 取消
+            Repo->>WP: Kill(true)（0.2s 内真终止）
+            Repo--xVM: 抛 ScanCancelled
+        else 互斥冲突（rc=0x8A150001 或空输出失败）
+            Repo->>Repo: Task.Delay(400, ct) → 重试（≤2 次，退避计入同一 deadline）
+        end
+    end
+    WP-->>Repo: 表格 stdout 字节
+    Repo->>Repo: 解码链 utf-8-sig→utf-8→cp936→gbk→replace
+    Repo-->>Cat: CommandResult
+
+    Cat->>TP: ParseListOutput(stdout)
+    TP-->>Cat: List<RawPackage>
+    Cat->>Cat: 去重（小写 ID；保 reinstallable 优先的一条）→ reinstallable 判定（源∈{winget,msstore}）→ isDependency 关键词初判
+    Cat->>RC: Get(id)（缓存 True 覆盖关键词 / False 不打假 / 未命中退回关键词）
+    Cat->>Cat: 排序（可重装在前，名称不区分大小写升序）+ 统计
+    Cat-->>VM: CatalogSnapshot
+
+    VM->>VM: DispatcherQueue 切 UI 线程
+    VM->>VM: SelectionStore 合并勾选 → RebuildGroups()
+    VM->>UI: Groups 整体重建（CollectionViewSource 分组，批应用）
+    UI-->>VM: 三组列表渲染（空组无组头；不支持组灰显；运行库 InfoBadge）
+    VM->>VM: IsScanning=false，按钮变「重新扫描」，统计卡更新
+
+    VM->>EW: Start(snapshot)
+    loop 逐条 pending（可重装 ∧ 关键词判软件 ∧ 缓存未命中）
+        EW->>Repo: ShowMetadataAsync(id, ct)（SemaphoreSlim 串行，扫描可抢占）
+        Repo->>WP: winget show --id <id> --exact ...
+        WP-->>Repo: show 文本
+        Repo-->>EW: CommandResult
+        EW->>EW: AnalyzeRuntimeSignal → True/False/None
+        alt True/False（None 不写缓存）
+            EW->>RC: Put(id, dep)（写后立即落盘，schema=1）
+            EW-->>VM: （攒批）改判结果
+        end
+    end
+    VM->>UI: 改判按批应用 → RebuildGroups() 整体重建（不逐条刷新）

@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       WinUI 3 应用工程（未打包 + Windows App SDK self-contained + Native AOT）
+       见 docs/ARCHITECTURE.md §1.4 / §5 UNCLEAR#1/#2
+       ═══════════════════════════════════════════════════════════════════ -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RootNamespace>WingetManager</RootNamespace>
+    <AssemblyName>WingetManager</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <UseWinUI>true</UseWinUI>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+
+    <!-- ══ Native AOT ══ -->
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <SelfContained>true</SelfContained>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <TrimMode>full</TrimMode>
+    <!-- 必须保留中文文化感知行为，绝不设 InvariantGlobalization=true -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+
+    <!-- WinAppSDK AOT 必配：XAML 编译期生成绑定路径，禁反射回退 -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Native AOT 与 PublishSingleFile 互斥（SDK 明确报错），AOT 产出的本身就是
+         一个原生 exe；WinAppSDK self-contained 会附带少量原生 DLL（见 ARCHITECTURE §5 UNCLEAR#1） -->
+
+    <!-- 明确关闭 AOT 下不可用的运行时特性 -->
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <EventSourceSupport>false</EventSourceSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 版本钉死：AOT 行为对 WinAppSDK 小版本敏感（ARCHITECTURE §5 UNCLEAR#2） -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.251107005" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4948" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WingetManager.Core\WingetManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

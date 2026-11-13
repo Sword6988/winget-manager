@@ -1,0 +1,218 @@
+classDiagram
+    direction LR
+
+    class RawPackage {
+        <<record · 对应 winget_table.RawPackage>>
+        +string Name
+        +string PackageId
+        +string Version
+        +string Available
+        +string Source
+    }
+
+    class Package {
+        <<对应 catalog.Package>>
+        +string PackageIdentifier
+        +string Name
+        +string Version
+        +string AvailableVersion
+        +string Source
+        +string IdKind
+        +bool Reinstallable
+        +bool IsDependency
+    }
+
+    class CatalogSnapshot {
+        <<对应 catalog.CatalogSnapshot>>
+        +string GeneratedAt
+        +int DurationMs
+        +string WingetVersion
+        +MachineInfo Machine
+        +CatalogCounts Counts
+        +IReadOnlyList~Package~ Packages
+    }
+
+    class CommandResult {
+        <<对应 winget_cli.CommandResult>>
+        +IReadOnlyList~string~ Args
+        +int ReturnCode
+        +string Stdout
+        +string Stderr
+        +int DurationMs
+        +bool Ok
+        +string Combined()
+    }
+
+    class WingetRepository {
+        <<唯一 winget 出口 · 对应 winget_cli.py>>
+        -AppConfig _config
+        -SemaphoreSlim _gate
+        +Task~CommandResult~ RunAsync(args, timeout, CancellationToken)**
+        +Task~string~ GetVersionAsync(CancellationToken)
+        +Task~CommandResult~ ListInstalledAsync(CancellationToken)
+        +Task~CommandResult~ ShowMetadataAsync(packageId, CancellationToken)
+        -DecodeOutput(bytes)$ string
+        -IsMutexConflict(CommandResult)$ bool
+    }
+
+    class TableParser {
+        <<静态纯函数 · 对应 winget_table.py>>
+        +ParseListOutput(text)$ List~RawPackage~
+        -LocateColumns(header)$ (offsets, fields)?
+        -SplitRow(line, offsets)$ List~string~
+        -ParseByGaps(lines)$ List~RawPackage~
+        +DisplayWidth(text)$ int
+    }
+
+    class CatalogService {
+        <<对应 catalog.CatalogService>>
+        -AppConfig _config
+        -WingetRepository _repo
+        -RuntimeCache _cache
+        +Task~CatalogSnapshot~ BuildSnapshotAsync(CancellationToken, string wingetVersion)
+        +List~string~ PendingMetadataIds(CatalogSnapshot)$
+        -IsReinstallable(RawPackage)$ bool
+        -IsDependencyByKeyword(RawPackage)$ bool
+        -IdKind(packageId)$ string
+    }
+
+    class RuntimeMetadataService {
+        <<对应 metadata.py 前半>>
+        +AnalyzeRuntimeSignal(text)$ (bool?, string?)
+        -ExtractSections(text)$ (desc, tags, urls)
+        -MatchedSignal(text)$ string?
+    }
+
+    class RuntimeCache {
+        <<对应 metadata.RuntimeCache>>
+        -string _path
+        -Dictionary~string,CacheEntry~ _entries
+        +bool? Get(packageId)
+        +void Put(packageId, dep)
+        -Load()$ Dictionary
+        -Save()
+    }
+
+    class EnrichmentWorker {
+        <<后台富化 · 对应 Python 富化线程>>
+        -WingetRepository _repo
+        -RuntimeCache _cache
+        -CancellationTokenSource _cts
+        +void Start(CatalogSnapshot)
+        +void CancelAsync()
+    }
+
+    class ExportService {
+        <<对应 profiles.py>>
+        +WingetImportManifest BuildManifest(selected, wingetVersion)
+        +Dictionary~string,int~ SourceBreakdown(selected)
+        +string BuildRestoreBat(jsonName, count, msstore)
+        +string BuildUnreinstallableList(packages)
+        +Task~ExportResult~ ExportAsync(dirPath, selected, wingetVersion)
+        -NormalizeWingetVersion(raw)$ string
+    }
+
+    class FilterEngine {
+        <<搜索/筛选纯函数>>
+        +Func~Package,bool~ BuildPredicate(query, group, onlySelected)$
+        -ParseQuery(query)$ List~Term~
+    }
+
+    class SelectionStore {
+        <<对应 selection.json 持久化>>
+        +HashSet~string~ Load()
+        +void Save(ids)
+    }
+
+    class SettingsStore {
+        <<HKCU\Software\Shibeng\WingetManager>>
+        +string GetLastExportPath()
+        +void SetLastExportPath(path)
+        +WindowBounds GetWindowBounds()
+        +void SetWindowBounds(bounds)
+    }
+
+    class AppConfig {
+        <<对应 core/config.py>>
+        +string WingetExe
+        +int CacheTtlSeconds
+        +int CommandTimeoutSeconds
+        +string? WingetError
+        +Load()$ AppConfig
+        -FindWinget()$ string
+    }
+
+    class LogService {
+        <<对应 core/logging_setup.py>>
+        +Info(string msg, params object[] args)
+        +Warn(...)
+        +Error(...)
+        -RotateIfNeeded()
+    }
+
+    class AtomicFile {
+        <<对应 core/fsio.py>>
+        +WriteText(path, text, encoding)$
+        +WriteJson(path, payload, JsonTypeInfo)$
+    }
+
+    class MainViewModel {
+        <<MVVM · App 层编排>>
+        +ObservableCollection~PackageGroup~ Groups
+        +string SearchText
+        +bool OnlySelected
+        +bool IsScanning
+        +string StatusText
+        +CatalogCounts Counts
+        +RelayCommand RescanOrCancelCommand
+        +RelayCommand ExportCommand
+        +RelayCommand SelectAllCommand
+        +RelayCommand InvertSelectionCommand
+        +void ApplySnapshot(CatalogSnapshot)
+        +void RebuildGroups()
+    }
+
+    class PackageRow {
+        <<行 VM · INotifyPropertyChanged>>
+        +Package Model
+        +bool IsChecked
+        +bool IsDependency
+        +bool IsEnabled
+    }
+
+    class PackageGroup {
+        <<分组 VM>>
+        +string Title
+        +int Count
+        +ObservableCollection~PackageRow~ Rows
+        +RelayCommand SelectGroupCommand
+    }
+
+    CatalogService --> WingetRepository : 调用 list
+    CatalogService --> TableParser : 解析输出
+    CatalogService --> RuntimeCache : 合并缓存判定
+    CatalogService ..> Package : 产出
+    CatalogService ..> CatalogSnapshot : 产出
+    CatalogService --> RuntimeMetadataService : 信号判定复用
+    EnrichmentWorker --> WingetRepository : show（与扫描共用、串行）
+    EnrichmentWorker --> RuntimeMetadataService : 解析信号
+    EnrichmentWorker --> RuntimeCache : 逐条写缓存
+    WingetRepository ..> CommandResult : 产出
+    TableParser ..> RawPackage : 产出
+    FilterEngine ..> Package : 过滤谓词
+    ExportService --> AtomicFile : GBK/JSON 原子写
+    ExportService ..> Package : 输入
+    RuntimeCache --> AtomicFile : 逐条落盘
+    SelectionStore --> AtomicFile
+    RuntimeCache ..> MetadataCacheFile : JSON 源生成 DTO
+    SelectionStore ..> SelectionFile : JSON 源生成 DTO
+    ExportService ..> WingetImportManifest : JSON 源生成 DTO
+    MainViewModel --> CatalogService : 发起扫描
+    MainViewModel --> EnrichmentWorker : 扫描后启动富化
+    MainViewModel --> FilterEngine : 重建可见集合
+    MainViewModel --> ExportService : 导出三件套
+    MainViewModel --> SettingsStore : 路径/窗口记忆
+    MainViewModel --> SelectionStore : 勾选持久化与恢复
+    MainViewModel *-- PackageGroup : Groups
+    PackageGroup *-- PackageRow : Rows
+    PackageRow --> Package : 持有模型

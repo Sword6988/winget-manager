@@ -1,0 +1,47 @@
+## Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+x64/
+x86/
+ARM64/
+artifacts/
+publish/
+
+## Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+
+## Native AOT / ILC intermediates
+*.obj
+*.ilk
+*.pdb
+*.pgc
+*.pgd
+*.map
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+*.nuget.props
+*.nuget.targets
+
+## Test results
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+coverage*.xml
+*.received.*
+
+## OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
