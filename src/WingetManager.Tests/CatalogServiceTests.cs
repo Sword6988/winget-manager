@@ -247,7 +247,7 @@ public sealed class CatalogServiceTests
     }
 
     [Fact]
-    public async Task PendingMetadataIds_SkipsKeywordDependenciesAndCached()
+    public void PendingMetadataIds_SkipsKeywordDependenciesAndCached()
     {
         var cache = new RuntimeCache(TempFile("mc-pending-kw.json"));
         cache.Put("Vendor.App.Done", false);

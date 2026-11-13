@@ -23,7 +23,8 @@ public static class AtomicFile
     /// </summary>
     /// <param name="path">目标文件路径。</param>
     /// <param name="text">要写入的文本（调用方保证换行符符合要求）。</param>
-    /// <param name="encoding">编码；默认 UTF-8（无 BOM）。GBK 写盘传 <c>Encoding.GetEncoding(936)</c>。</param>
+    /// <param name="encoding">编码；默认 UTF-8（无 BOM）。GBK 写盘传 <c>Encoding.GetEncoding(936)</c>；
+    /// 需要 BOM 时传 <see cref="TextEncoding.Utf8Bom"/>（前导码会自动写出）。</param>
     /// <exception cref="IOException">磁盘满/无权限等；失败时目标文件保持旧内容，临时文件被清理。</exception>
     public static void WriteText(string path, string text, Encoding? encoding = null)
     {
@@ -38,7 +39,23 @@ public static class AtomicFile
         }
 
         var enc = encoding ?? Utf8NoBom;
-        var bytes = enc.GetBytes(text);
+        var textBytes = enc.GetBytes(text);
+
+        // Encoding.GetBytes 不含 BOM，但 Python 的 encoding="utf-8-sig" 会写出 BOM。
+        // 「无法自动重装清单.txt」要和原版字节一致，所以这里显式补上前导码。
+        var preamble = enc.GetPreamble();
+        byte[] bytes;
+        if (preamble.Length == 0)
+        {
+            bytes = textBytes;
+        }
+        else
+        {
+            bytes = new byte[preamble.Length + textBytes.Length];
+            Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
+            Buffer.BlockCopy(textBytes, 0, bytes, preamble.Length, textBytes.Length);
+        }
+
         WriteBytes(fullPath, bytes);
     }
 

@@ -22,6 +22,14 @@ public static class TextEncoding
         return Encoding.GetEncoding(GbkCodePage);
     }, LazyThreadSafetyMode.ExecutionAndPublication);
 
+    private static readonly Lazy<Encoding> GbkStrictLazy = new(() =>
+    {
+        EnsureProvider();
+        // 默认 fallback 是「静默替换成 ?」，这里要复刻 Python 的 <c>.encode("gbk")</c>：
+        // 编不进去必须抛 EncoderFallbackException，否则用户会拿到一份带 ? 的恢复脚本。
+        return Encoding.GetEncoding(GbkCodePage, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
+    }, LazyThreadSafetyMode.ExecutionAndPublication);
+
     private static int _registered;
 
     /// <summary>UTF-8（无 BOM）：JSON / 日志 / 普通文本落盘用。</summary>
@@ -35,6 +43,12 @@ public static class TextEncoding
 
     /// <summary>GBK（cp936）：<c>恢复-apps.bat</c> 写盘用。</summary>
     public static Encoding Gbk => GbkLazy.Value;
+
+    /// <summary>
+    /// 严格 GBK（编不进去抛 <see cref="EncoderFallbackException"/>）。
+    /// 用来在写盘前校验文件名等用户可控文本（对应 Python 的 <c>str.encode("gbk")</c>）。
+    /// </summary>
+    public static Encoding GbkStrict => GbkStrictLazy.Value;
 
     /// <summary>注册代码页提供程序（幂等，可重复调用）。</summary>
     public static void EnsureProvider()

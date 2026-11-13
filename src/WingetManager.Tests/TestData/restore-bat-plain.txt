@@ -1,0 +1,40 @@
+@echo off
+chcp 936 >nul
+title 恢复软件清单
+cd /d "%~dp0"
+
+where winget >nul 2>nul
+if errorlevel 1 (
+  echo.
+  echo [x] 未找到 winget，请先安装「应用安装程序 / App Installer」。
+  echo     打开 Microsoft Store 搜索 App Installer 即可安装。
+  echo.
+  pause
+  exit /b 1
+)
+
+net session >nul 2>nul
+if errorlevel 1 (
+  echo.
+  echo [!] 当前不是管理员权限。部分机器级安装包会失败，
+  echo     建议右键本文件 - 以管理员身份运行。继续执行请按任意键。
+  pause >nul
+)
+
+echo.
+echo   Winget 软件管家 · 恢复脚本
+echo   ----------------------------------------
+echo   清单: "apps.json"（3 个软件包）
+echo.
+echo.
+echo   即将执行 winget import，请保持网络畅通。
+echo   源里已下架的包会被自动跳过，不影响其余安装。
+echo.
+pause
+
+winget import -i "%~dp0apps.json" --accept-package-agreements --accept-source-agreements --ignore-unavailable
+
+echo.
+echo   ----------------------------------------
+echo   执行结束。按任意键关闭。
+pause >nul
