@@ -99,8 +99,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         UpdateCounts();
     }
 
-    /// <summary>三组分组集合（<c>CollectionViewSource</c> 的数据源）。</summary>
-    public ObservableCollection<PackageGroup> Groups { get; } = new();
+    /// <summary>
+    /// 列表条目（组头/行拍平后的扁平集合，<c>ListView.ItemsSource</c> 的数据源）。
+    /// 不用 <c>CollectionViewSource</c> 分组的原因见 <see cref="ListEntry"/> 的注释（AOT bug #10881）。
+    /// </summary>
+    public ObservableCollection<ListEntry> Entries { get; } = new();
+
+    /// <summary>当前的三个分组 VM（仅内部编排用；组对象不再直接交给视图）。</summary>
+    private readonly List<PackageGroup> _groups = new();
 
     /// <summary>搜索框文本（多关键词 AND，支持 id:/name: 前缀）。</summary>
     [ObservableProperty]
@@ -335,10 +341,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 按「搜索词 + 分组胶囊 + 仅看已选」重建三组列表（空组不产生组头）。
+    /// 按「搜索词 + 分组胶囊 + 仅看已选」重建列表（空组不产生组头）。
     ///
     /// 整体重建而不做差异更新：一次扫描几百上千行，逐条 diff 的复杂度换不来体验，
     /// 反而容易在虚拟化容器复用上踩坑（<c>x:Bind</c> 一次性绑定 + 容器回收）。
+    ///
+    /// 条目按「组头 → 该组全部行」的顺序拍平进 <see cref="Entries"/>；
+    /// 组对象进 <see cref="_groups"/>（仅编排用，不进视图）。
     /// </summary>
     public void RebuildGroups()
     {
@@ -371,7 +380,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _suppressRowEvents = true;
         try
         {
-            Groups.Clear();
+            _groups.Clear();
+            Entries.Clear();
             foreach (var groupName in PackageGroups.Order)
             {
                 var rows = grouped[groupName];
@@ -380,7 +390,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
-                Groups.Add(new PackageGroup(groupName, rows, ToggleGroupSelection));
+                var group = new PackageGroup(groupName, rows, ToggleGroupSelection);
+                _groups.Add(group);
+                Entries.Add(new GroupHeaderEntry(group));
+                foreach (var row in rows)
+                {
+                    Entries.Add(new PackageRowEntry(row));
+                }
             }
         }
         finally
@@ -399,7 +415,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <param name="groupName">组名。</param>
     public void ToggleGroupSelection(string groupName)
     {
-        var group = Groups.FirstOrDefault(g => string.Equals(g.Title, groupName, StringComparison.Ordinal));
+        var group = _groups.FirstOrDefault(g => string.Equals(g.Title, groupName, StringComparison.Ordinal));
         if (group is null)
         {
             return;
@@ -497,7 +513,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void NotifyGroupsSelectionChanged()
     {
-        foreach (var group in Groups)
+        foreach (var group in _groups)
         {
             group.NotifySelectionChanged();
         }
@@ -773,7 +789,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var visibleCount = 0;
-        foreach (var group in Groups)
+        foreach (var group in _groups)
         {
             visibleCount += group.Count;
         }
@@ -873,7 +889,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _suppressRowEvents = true;
         try
         {
-            foreach (var group in Groups)
+            foreach (var group in _groups)
             {
                 foreach (var row in group)
                 {
@@ -1004,7 +1020,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private List<PackageRow> VisibleSelectableRows()
     {
         var rows = new List<PackageRow>();
-        foreach (var group in Groups)
+        foreach (var group in _groups)
         {
             foreach (var row in group)
             {

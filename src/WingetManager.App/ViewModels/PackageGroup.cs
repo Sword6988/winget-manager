@@ -10,13 +10,12 @@ namespace WingetManager.ViewModels;
 /// <summary>
 /// 分组 VM（对应 ARCHITECTURE §3 <c>PackageGroup</c>）。
 ///
-/// 两个身份必须同时成立：
+/// 现在它只承担两个职责（不再直接进视图——AOT 下 CVS 分组条目丢失，
+/// 见 <see cref="ListEntry"/> 注释）：
 /// <list type="number">
-/// <item>它是「行的集合」——<see cref="ObservableCollection{T}"/>，供
-///       <c>CollectionViewSource.IsSourceGrouped=true</c> 当作一个分组；</item>
-/// <item>它是「一个分组对象」——实现 <see cref="IGrouping{TKey,TElement}"/>，暴露
-///       <see cref="Key"/>，组头模板（<c>GroupStyle.HeaderTemplate</c>）的
-///       DataContext 就是这个对象本身，所以模板里能用 <c>x:Bind</c> 直接绑属性。</item>
+/// <item>它是「行的集合」——组内行的持有者，供全选本组 / 统计等编排逻辑枚举；</item>
+/// <item>它是「一个组头的数据源」——<see cref="GroupHeaderEntry"/> 包着它进列表，
+///       组头模板用 <c>x:Bind</c> 直接绑属性。</item>
 /// </list>
 /// 顺序由 <see cref="MainViewModel"/> 按「软件 → 运行库 → winget 不支持」固定给出。
 /// </summary>

@@ -10,16 +10,103 @@
     mc:Ignorable="d"
     Title="Winget 软件管家">
 
+
+
   <!--
     单页三行布局（PRD「UI Design Draft」）：
       Row0 顶栏：标题 / 搜索 / 导出 + 分组胶囊 / 仅看已选 / 全选 / 反选
-      Row1 列表：CollectionViewSource 分组的 ListView（三组固定顺序，空组无组头）
+      Row1 列表：拍平条目的 ListView（组头/行由模板选择器区分；三组固定顺序，空组无组头）
       Row2 底栏：进度条 + 状态/计时 + 统计卡
 
     AOT 约束：全文件只用 x:Bind（编译期绑定），布尔转 Visibility 用静态函数绑定
     （app:UiConverters.VisibleIf），既避免反射型 IValueConverter 查找，也不需要转换器资源。
   -->
   <Grid x:Name="RootGrid" Background="Transparent">
+    <!--
+      列表条目模板（组头 / 行，由 ListEntryTemplateSelector 按精确类型选择）。
+      两个坑（都是实测踩出来的）：
+      1. 不用 ListView.GroupStyle + CollectionViewSource 分组——Native AOT 下 CVS 只出
+         组头、条目进不了视图（microsoft-ui-xaml issue #10881，官方 Backlog）；
+      2. 模板不能放进 <Window.Resources>——WinUI 3 的 Window 不是 FrameworkElement，
+         XamlCompiler 遇到会静默崩溃（退出码 1、无任何诊断输出）。放 Grid.Resources 正常。
+      拍平成 ListEntry 扁平集合后模板选择是纯类型判断，AOT 安全。
+    -->
+    <Grid.Resources>
+    <DataTemplate x:Key="GroupHeaderTemplate" x:DataType="vm:GroupHeaderEntry">
+      <Grid Padding="4,12,4,6" ColumnSpacing="12">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <TextBlock Text="{x:Bind Group.Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+          <TextBlock
+              Text="{x:Bind Group.CountText}"
+              FontSize="12"
+              VerticalAlignment="Center"
+              Foreground="{ThemeResource AppSubtleTextBrush}" />
+        </StackPanel>
+        <Button
+            Grid.Column="1"
+            Content="{x:Bind Group.ToggleGroupText, Mode=OneWay}"
+            Command="{x:Bind Group.ToggleGroupCommand}"
+            Padding="10,2"
+            FontSize="12" />
+      </Grid>
+    </DataTemplate>
+
+    <DataTemplate x:Key="PackageRowTemplate" x:DataType="vm:PackageRowEntry">
+      <Grid MinHeight="46" Padding="6,3" ColumnSpacing="12" Opacity="{x:Bind Row.RowOpacity}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <CheckBox
+            Grid.Column="0"
+            MinWidth="0"
+            VerticalAlignment="Center"
+            IsChecked="{x:Bind Row.IsChecked, Mode=TwoWay}"
+            IsEnabled="{x:Bind Row.IsSelectable}" />
+
+        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+          <TextBlock Text="{x:Bind Row.Name}" TextTrimming="CharacterEllipsis" />
+          <TextBlock
+              Text="{x:Bind Row.Subtitle}"
+              FontSize="11"
+              TextTrimming="CharacterEllipsis"
+              Foreground="{ThemeResource AppSubtleTextBrush}" />
+        </StackPanel>
+
+        <!-- 运行库角标（InfoBadge 只支持数字/图标，这里用等价视觉的文本徽标） -->
+        <Border
+            Grid.Column="2"
+            Padding="8,2"
+            VerticalAlignment="Center"
+            CornerRadius="9"
+            Background="{ThemeResource AccentFillColorDefaultBrush}"
+            Visibility="{x:Bind app:UiConverters.VisibleIf(Row.ShowDependencyBadge), Mode=OneWay}">
+          <TextBlock
+              Text="运行库"
+              FontSize="11"
+              Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+        </Border>
+
+        <TextBlock
+            Grid.Column="3"
+            MinWidth="84"
+            VerticalAlignment="Center"
+            HorizontalAlignment="Right"
+            FontSize="12"
+            TextAlignment="Right"
+            Text="{x:Bind Row.VersionText}"
+            Foreground="{ThemeResource AppSubtleTextBrush}" />
+      </Grid>
+    </DataTemplate>
+  
+    </Grid.Resources>
     <Grid.KeyboardAccelerators>
       <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnFocusSearchAccelerator" />
       <KeyboardAccelerator Key="A" Modifiers="Control" Invoked="OnSelectAllAccelerator" />
@@ -117,95 +204,12 @@
     <Grid Grid.Row="1">
       <ListView
           x:Name="PackageList"
-          ItemsSource="{x:Bind GroupedSource.View}"
+          ItemsSource="{x:Bind ViewModel.Entries}"
           SelectionMode="None"
           IsItemClickEnabled="False"
           Padding="14,0,14,6"
           ItemContainerTransitions="{x:Null}"
-          Visibility="{x:Bind app:UiConverters.CollapsedIf(ViewModel.ShowGuide), Mode=OneWay}">
-
-        <ListView.GroupStyle>
-          <GroupStyle>
-            <GroupStyle.HeaderTemplate>
-              <DataTemplate x:DataType="vm:PackageGroup">
-                <Grid Padding="4,12,4,6" ColumnSpacing="12">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                  </Grid.ColumnDefinitions>
-                  <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                    <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock
-                        Text="{x:Bind CountText}"
-                        FontSize="12"
-                        VerticalAlignment="Center"
-                        Foreground="{ThemeResource AppSubtleTextBrush}" />
-                  </StackPanel>
-                  <Button
-                      Grid.Column="1"
-                      Content="{x:Bind ToggleGroupText, Mode=OneWay}"
-                      Command="{x:Bind ToggleGroupCommand}"
-                      Padding="10,2"
-                      FontSize="12" />
-                </Grid>
-              </DataTemplate>
-            </GroupStyle.HeaderTemplate>
-          </GroupStyle>
-        </ListView.GroupStyle>
-
-        <ListView.ItemTemplate>
-          <DataTemplate x:DataType="vm:PackageRow">
-            <Grid MinHeight="46" Padding="6,3" ColumnSpacing="12" Opacity="{x:Bind RowOpacity}">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-
-              <CheckBox
-                  Grid.Column="0"
-                  MinWidth="0"
-                  VerticalAlignment="Center"
-                  IsChecked="{x:Bind IsChecked, Mode=TwoWay}"
-                  IsEnabled="{x:Bind IsSelectable}" />
-
-              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
-                <TextBlock
-                    Text="{x:Bind Subtitle}"
-                    FontSize="11"
-                    TextTrimming="CharacterEllipsis"
-                    Foreground="{ThemeResource AppSubtleTextBrush}" />
-              </StackPanel>
-
-              <!-- 运行库角标（InfoBadge 只支持数字/图标，这里用等价视觉的文本徽标） -->
-              <Border
-                  Grid.Column="2"
-                  Padding="8,2"
-                  VerticalAlignment="Center"
-                  CornerRadius="9"
-                  Background="{ThemeResource AccentFillColorDefaultBrush}"
-                  Visibility="{x:Bind app:UiConverters.VisibleIf(ShowDependencyBadge)}">
-                <TextBlock
-                    Text="运行库"
-                    FontSize="11"
-                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-              </Border>
-
-              <TextBlock
-                  Grid.Column="3"
-                  MinWidth="84"
-                  VerticalAlignment="Center"
-                  HorizontalAlignment="Right"
-                  FontSize="12"
-                  TextAlignment="Right"
-                  Text="{x:Bind VersionText}"
-                  Foreground="{ThemeResource AppSubtleTextBrush}" />
-            </Grid>
-          </DataTemplate>
-        </ListView.ItemTemplate>
-      </ListView>
+          Visibility="{x:Bind app:UiConverters.CollapsedIf(ViewModel.ShowGuide), Mode=OneWay}" />
 
       <!-- 空态（P1-2）：无结果 / 仅看已选无勾选 / 尚未扫描 -->
       <StackPanel

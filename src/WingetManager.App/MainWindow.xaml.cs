@@ -6,7 +6,6 @@ using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
@@ -22,8 +21,8 @@ namespace WingetManager;
 ///
 /// AOT 相关：
 /// <list type="bullet">
-/// <item>分组视图用代码创建 <see cref="CollectionViewSource"/>（XAML 里给它 <c>x:Name</c>
-///       需要进 ResourceDictionary，反而绕）；</item>
+/// <item>列表不用 <c>CollectionViewSource</c> 分组（AOT 下组内条目进不了视图，
+///       microsoft-ui-xaml issue #10881），改为拍平的条目集合 + 模板选择器；</item>
 /// <item>文件选择器必须用 <c>WindowNative</c> + <c>InitializeWithWindow</c> 传 hwnd
 ///       （未打包应用没有隐式窗口上下文），这条是 CsWinRT 源生成链路，AOT 安全；</item>
 /// <item><see cref="ContentDialog"/> 在未打包场景必须显式给 <c>XamlRoot</c>，否则直接抛。</item>
@@ -31,7 +30,6 @@ namespace WingetManager;
 /// </summary>
 public sealed partial class MainWindow : Window, IMainView
 {
-    private readonly CollectionViewSource _groupedSource = new() { IsSourceGrouped = true };
     private readonly SettingsStore _settings;
 
     /// <summary>创建主窗口并完成装配。</summary>
@@ -44,8 +42,13 @@ public sealed partial class MainWindow : Window, IMainView
 
         ViewModel = new MainViewModel(this, App.Log);
 
-        // 分组视图的数据源就是 VM 的 Groups；集合内部增删由 ObservableCollection 通知视图
-        _groupedSource.Source = ViewModel.Groups;
+        // 模板选择器在代码里装配（模板在 RootGrid.Resources；WinUI 3 的 Window 没有
+        // Resources，把它写进 <Window.Resources> 会让 XamlCompiler 静默崩溃退出码 1）
+        PackageList.ItemTemplateSelector = new AppServices.ListEntryTemplateSelector
+        {
+            HeaderTemplate = (DataTemplate)RootGrid.Resources["GroupHeaderTemplate"],
+            RowTemplate = (DataTemplate)RootGrid.Resources["PackageRowTemplate"],
+        };
 
         RestoreGroupSelection();
         ApplyWindowBounds();
@@ -57,9 +60,6 @@ public sealed partial class MainWindow : Window, IMainView
 
     /// <summary>编排中枢（x:Bind 的唯一数据根）。</summary>
     public MainViewModel ViewModel { get; }
-
-    /// <summary>列表的分组视图（供 <c>ItemsSource="{x:Bind GroupedSource.View}"</c>）。</summary>
-    public CollectionViewSource GroupedSource => _groupedSource;
 
     /// <summary>Mica 背景（P1-6 深浅色跟随系统；不支持的系统静默跳过）。</summary>
     private void TrySetMicaBackdrop()
