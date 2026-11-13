@@ -420,3 +420,27 @@ start "" "%TARGET%\WingetManager.exe"
 - F2（`%TEMP%\7zSxxxx` 空目录壳）：内容已被 7zSD 清空、0 文件 0 字节。若在 `install.cmd` 末尾追加延时 `rd`，会与 7zSD 自己的清理序列并发执行，存在竞态风险（可能删到 SFX 仍在使用的目录）；本轮复查时现场已无残留空壳（0 个），不建议为纯观感引入竞态。
 - F4（应用继承安装器权限）：`start` 让 SFX 立即返回以便尽快清临时目录，是当前管线的前提；降权需要改启动方式并重新做安装实测，未验证的启动路径不宜直接上线，留待下一版配 QA 用例一起做。
 
+
+### 10.10 双击即用改造（工程师侧，2026-11-13 19:2x）
+
+用户反馈「不能直接运行，还得安装」，据此做的三处改动（不改应用代码，只改分发层）：
+
+| 改动 | 说明 |
+|---|---|
+| 去掉 `BeginPrompt` | `sfx-config.txt` 不再弹「是否继续安装」确认框，双击直接解压 + 就位 + 启动 |
+| 版本快速路径 | 载荷新增 `version.txt`（由 `App.xaml.cs` 的 `Version` 常量渲染）；`install.cmd` 比对安装目录的 `version.txt`，一致则跳过 `taskkill` + `robocopy` 直接 `start` |
+| 剔除 pdb | AOT publish 目录里有 58 MB 的 `WingetManager.pdb`，分发包不需要：构建时删除，`install.cmd` 用 `/xf *.pdb` 拦住并在升级时显式 `del` 旧 pdb |
+
+体积：SFX **22.4 MB → 16.8 MB**，安装后目录 **130 MB → 72 MB**（277 个文件 / 90 个子目录）。
+
+影子目录实测（`TARGET` 重定向到临时目录，`start` 替换为 marker 输出，不触碰真实安装）：
+
+| 用例 | 结果 |
+|---|---|
+| 旧安装（预置 1 MB 假 pdb、无 version.txt）→ 完整路径 | PASS：输出 `PATH_FULL` + `PATH_LAUNCH`，复制完成 277 个文件，假 pdb **被清除**，`version.txt=3.0.0`，`install.cmd` **未串进**安装目录 |
+| 同版本再跑一次 → 快速路径 | PASS：输出 `PATH_FAST` + `PATH_LAUNCH`，`WingetManager.exe` 的 mtime **未被改写**（未发生拷贝） |
+| 版本标记改成 2.9.0（模拟升级）→ 应重回完整路径 | PASS：输出 `PATH_FULL`，`version.txt` 被刷回 `3.0.0` |
+| 内嵌配置块 | `Title="Winget 软件管家 3.0.0"`、`RunProgram="install.cmd"`、无 `BeginPrompt`、无 `@VERSION@` 残留 |
+
+快速路径里仍保留一次**优雅** `taskkill`（不带 `/f`）：双击已装同版本、且应用正在运行时，
+语义是「重开一个干净的窗口」，与旧版双击行为一致，不会叠出第二个实例。

@@ -167,17 +167,28 @@ fi
     exit 1
 }
 
+# ── 1.5 精简载荷 ────────────────────────────────────────────────────
+# AOT 会在 publish 目录留下 58 MB 的 WingetManager.pdb（调试符号）。
+# 分发包不需要它：删掉后载荷 130 MB → 72 MB，SFX 体积直接减半。
+# install.cmd 里还有 /xf *.pdb，负责把旧安装里已有的 pdb 一并清掉。
+find "$STAGE_DIR" -maxdepth 1 -name '*.pdb' -type f -delete
+# 版本标记：install.cmd 用它判断"已装同版本 → 直接启动"，避免重复拷贝。
+printf '%s' "$VERSION" > "$STAGE_DIR/version.txt"
+
 # ── 2. 压缩 publish 目录内容（归档根即 publish 根）+ install.cmd ────
 ARCHIVE="$(mktemp -d)/payload.7z"
+CONFIG_RENDERED="$(dirname "$ARCHIVE")/sfx-config.txt"
 trap 'rm -rf "$(dirname "$ARCHIVE")"' EXIT
+sed "s/@VERSION@/$VERSION/" "$SFX_CONFIG" > "$CONFIG_RENDERED"
 ( cd "$STAGE_DIR" && "$SEVENZIP" a -mx9 "$ARCHIVE" . > /dev/null )
 ( cd packaging && "$SEVENZIP" a "$ARCHIVE" install.cmd > /dev/null )
 
 # ── 3. 拼接 SFX：模块 + 配置(UTF-8 无 BOM) + 归档 ───────────────────
-cat "$SFX_MODULE" "$SFX_CONFIG" "$ARCHIVE" > "$OUT_FILE"
+cat "$SFX_MODULE" "$CONFIG_RENDERED" "$ARCHIVE" > "$OUT_FILE"
 
 echo "════════════════════════════════════════"
 echo "产物：$OUT_FILE"
+echo "载荷：$(du -sh "$STAGE_DIR" | cut -f1)（已剔除 pdb）"
 ls -lh "$OUT_FILE"
-echo "校验归档条目（应含 install.cmd 与 WingetManager.exe）："
-"$SEVENZIP" l "$ARCHIVE" | grep -E "install\.cmd|WingetManager\.exe|^Path|files" | head -8
+echo "校验归档条目（应含 install.cmd / version.txt / WingetManager.exe，不含 pdb）："
+"$SEVENZIP" l "$ARCHIVE" | grep -E "install\.cmd|version\.txt|WingetManager\.exe|\.pdb|files" | head -8

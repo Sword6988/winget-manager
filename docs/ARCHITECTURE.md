@@ -624,7 +624,7 @@ graph TD
 | 5 | §2 文件列表：`ViewModels/CatalogFilter.cs` | 谓词落位 `Core/Services/FilterEngine.cs`（文档已注明） | 纯逻辑可测 |
 | 6 | 本机 AOT 链接 | `IlcUseEnvironmentalTools=true` + 手工拼 MSVC/SDK 环境变量 | `vswhere`/`vcvarsall.bat` 依赖 reg.exe，在受限环境不可用；正常开发机无需此参数 |
 | 7 | — | 导出按钮防重入（`CanExport`）、Ctrl+A 检测搜索框焦点、窗口越界钳制、`FileSavePicker` 失败回退默认路径确认 | 交互健壮性补强，语义与 PRD 一致 |
-| 8 | §5 UNCLEAR#1 结论 | **原生单文件不可行** → 改用 **7-Zip SFX 自解压安装器**，产物 `dist/WingetManager-3.0.0-win-x64-sfx.exe`（约 22.4 MB） | `PublishAot` 与 `PublishSingleFile` 互斥；且单文件 Bundler 需要托管 host，AOT 产物没有。`7zSD.sfx` 才实现 `<InstallPath>/<RunProgram>` 安装器管线（`7z.sfx`/`7zCon.sfx` 不支持） |
+| 8 | §5 UNCLEAR#1 结论 | **原生单文件不可行** → 改用 **7-Zip SFX 自解压安装器**，产物 `dist/WingetManager-3.0.0-win-x64-sfx.exe`（16.8 MB，载荷 72 MB） | `PublishAot` 与 `PublishSingleFile` 互斥；且单文件 Bundler 需要托管 host，AOT 产物没有。`7zSD.sfx` 才实现 `<InstallPath>/<RunProgram>` 安装器管线（`7z.sfx`/`7zCon.sfx` 不支持） |
 | 9 | 图标 | `Assets/app.ico`（16–256 共 7 档）+ `<ApplicationIcon>` + `AppWindow.SetIcon` + 顶栏 `ms-appx:///Assets/app-512.png`；SFX 图标由 `packaging/retarget-sfx-icon.py` 做 PE 资源手术替换 | 三处（exe 资源 / 标题栏·任务栏 / 界面）与安装器图标统一 |
 | 10 | 构建脚本 | `packaging/build-dist.sh` 用 vswhere + 版本排序自动探测 MSVC/WinSDK，publish 走 `-o dist/.stage/app`，支持 `--skip-publish` 只重打包 | 换机不用改脚本；探测与验证细节见 `docs/QA-REPORT-icon-pack.md` §10.9 |
 
@@ -641,6 +641,15 @@ bash packaging/build-dist.sh
 bash packaging/build-dist.sh --skip-publish
 ```
 
-产物 `dist/WingetManager-<版本>-win-x64-sfx.exe`：双击 → 提示 → 解压到临时目录 →
-`taskkill` 旧实例 → `robocopy /e /purge` 到 `%LOCALAPPDATA%\Programs\WingetManager` →
-启动应用 → 清理临时目录。升级失败（robocopy `errorlevel >= 8`）时不启动并给出日志。
+产物 `dist/WingetManager-<版本>-win-x64-sfx.exe`：**双击即用，无确认框**
+（`sfx-config.txt` 里不配 `BeginPrompt`）——
+
+1. 解压到临时目录，`install.cmd` 先读载荷里的 `version.txt` 与安装目录里的同名文件比对；
+2. **版本一致 → 快速路径**：不 `taskkill`、不 `robocopy`，直接 `start` 安装目录里的 exe，
+   所以第二次起双击同一个 exe 等同于"打开应用"（毫秒级）；
+3. **版本不同 / 未安装 → 完整路径**：`taskkill` 旧实例 → 删遗留 `install.cmd` 与 `*.pdb` →
+   `robocopy /e /purge` 到 `%LOCALAPPDATA%\Programs\WingetManager` → 启动 → 清理临时目录；
+4. 升级失败（robocopy `errorlevel >= 8`）时不启动，改为打开日志。
+
+载荷里不含 `WingetManager.pdb`（AOT 调试符号 58 MB，占原载荷 45%），
+`install.cmd` 的 `/xf *.pdb` + 显式 `del` 会把旧安装里的 pdb 一并清掉。
