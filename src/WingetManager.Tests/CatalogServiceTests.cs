@@ -22,7 +22,9 @@ public sealed class CatalogServiceTests
         private readonly Func<string, string>? _showOutput;
 
         public FakeRepository(string listStdout, Func<string, string>? showOutput = null)
-            : base(AppConfig.CreateForTests("fake-winget.exe", 60, 30))
+            : base(
+                AppConfig.CreateForTests("fake-winget.exe", 60, 30),
+                new LogService(TempFile("fake-repo.log")))
         {
             _listStdout = listStdout;
             _showOutput = showOutput;

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,8 +23,16 @@ public sealed class WingetRepositoryTests
     private static string CmdExe => Environment.GetEnvironmentVariable("ComSpec")
                                    ?? @"C:\Windows\System32\cmd.exe";
 
+    /// <summary>临时日志：这些用例会写「互斥/取消/失败」日志，注入独立文件避免污染真实 app.log。</summary>
+    private static string TempLogPath()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "wpm-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return Path.Combine(dir, "repo.log");
+    }
+
     private static WingetRepository CreateRepo(int commandTimeoutSeconds = 30)
-        => new(AppConfig.CreateForTests(CmdExe, 60, commandTimeoutSeconds));
+        => new(AppConfig.CreateForTests(CmdExe, 60, commandTimeoutSeconds), new LogService(TempLogPath()));
 
     // ── 解码链 ────────────────────────────────────────────────────────
 
@@ -118,7 +127,8 @@ public sealed class WingetRepositoryTests
     [Fact]
     public async Task RunAsync_ThrowsWingetNotFoundWhenExeMissing()
     {
-        var repo = new WingetRepository(AppConfig.CreateForTests(string.Empty, 60, 30, "未找到 winget.exe"));
+        var repo = new WingetRepository(
+            AppConfig.CreateForTests(string.Empty, 60, 30, "未找到 winget.exe"), new LogService(TempLogPath()));
 
         var ex = await Assert.ThrowsAsync<WingetNotFoundException>(
             () => repo.RunAsync(new[] { "--version" }));
@@ -129,7 +139,8 @@ public sealed class WingetRepositoryTests
     [Fact]
     public async Task RunAsync_ThrowsWingetNotFoundWhenExeNotExecutable()
     {
-        var repo = new WingetRepository(AppConfig.CreateForTests(@"Z:\definitely-not-here\winget.exe", 60, 30));
+        var repo = new WingetRepository(
+            AppConfig.CreateForTests(@"Z:\definitely-not-here\winget.exe", 60, 30), new LogService(TempLogPath()));
 
         await Assert.ThrowsAsync<WingetNotFoundException>(() => repo.RunAsync(new[] { "--version" }));
     }

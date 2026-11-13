@@ -361,7 +361,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// 是否启动后台元数据核查；冷启动渲染落盘快照时传 false——紧随其后的后台刷新
     /// 会用新快照重新走一遍完整流程，先起富化只会被 <see cref="ScanAsync"/> 立刻取消。
     /// </param>
-    public void ApplySnapshot(CatalogSnapshot snapshot, bool startEnrichment = true)
+    /// <param name="pruneSelection">
+    /// 是否按当前快照剪枝已选集合。冷启动渲染落盘快照时<b>必须传 false</b>：缓存可能是
+    /// 过期数据，按它剪枝会把「快照里没有但本机还在」的已选项从内存里删掉，用户一旦
+    /// 勾选任何一行就会把剪枝结果落盘 selection.json（静默丢数据）。剪枝一律等后台
+    /// 刷新产出新快照后再做——启动路径对用户数据保持只读。
+    /// </param>
+    public void ApplySnapshot(CatalogSnapshot snapshot, bool startEnrichment = true, bool pruneSelection = true)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -370,17 +376,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _packages.Clear();
         _packages.AddRange(snapshot.Packages);
 
-        // 勾选合并：只保留「本机当前存在且可重装」的 ID，
-        // 卸掉的软件、或变成 winget 不支持的项不该继续躺在导出清单里
-        var selectableIds = new HashSet<string>(
-            _packages.Where(p => p.Reinstallable).Select(p => p.PackageIdentifier),
-            StringComparer.OrdinalIgnoreCase);
-        _selected.RemoveWhere(id => !selectableIds.Contains(id));
-
-        // 「仅看已选」不持久化，但重扫后勾选为空时必须自动关闭，否则界面看起来是空的（P0-10）
-        if (_selected.Count == 0 && OnlySelected)
+        if (pruneSelection)
         {
-            OnlySelected = false;
+            // 勾选合并：只保留「本机当前存在且可重装」的 ID，
+            // 卸掉的软件、或变成 winget 不支持的项不该继续躺在导出清单里
+            var selectableIds = new HashSet<string>(
+                _packages.Where(p => p.Reinstallable).Select(p => p.PackageIdentifier),
+                StringComparer.OrdinalIgnoreCase);
+            _selected.RemoveWhere(id => !selectableIds.Contains(id));
+
+            // 「仅看已选」不持久化，但重扫后勾选为空时必须自动关闭，否则界面看起来是空的（P0-10）
+            if (_selected.Count == 0 && OnlySelected)
+            {
+                OnlySelected = false;
+            }
         }
 
         RebuildGroups();
@@ -605,7 +614,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            ApplySnapshot(cached, startEnrichment: false);
+            ApplySnapshot(cached, startEnrichment: false, pruneSelection: false);
             StatusText = string.Format(
                 CultureInfo.InvariantCulture,
                 "已加载上次扫描结果（{0}），正在后台刷新…",
