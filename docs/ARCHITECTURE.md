@@ -624,3 +624,23 @@ graph TD
 | 5 | §2 文件列表：`ViewModels/CatalogFilter.cs` | 谓词落位 `Core/Services/FilterEngine.cs`（文档已注明） | 纯逻辑可测 |
 | 6 | 本机 AOT 链接 | `IlcUseEnvironmentalTools=true` + 手工拼 MSVC/SDK 环境变量 | `vswhere`/`vcvarsall.bat` 依赖 reg.exe，在受限环境不可用；正常开发机无需此参数 |
 | 7 | — | 导出按钮防重入（`CanExport`）、Ctrl+A 检测搜索框焦点、窗口越界钳制、`FileSavePicker` 失败回退默认路径确认 | 交互健壮性补强，语义与 PRD 一致 |
+| 8 | §5 UNCLEAR#1 结论 | **原生单文件不可行** → 改用 **7-Zip SFX 自解压安装器**，产物 `dist/WingetManager-3.0.0-win-x64-sfx.exe`（约 22.4 MB） | `PublishAot` 与 `PublishSingleFile` 互斥；且单文件 Bundler 需要托管 host，AOT 产物没有。`7zSD.sfx` 才实现 `<InstallPath>/<RunProgram>` 安装器管线（`7z.sfx`/`7zCon.sfx` 不支持） |
+| 9 | 图标 | `Assets/app.ico`（16–256 共 7 档）+ `<ApplicationIcon>` + `AppWindow.SetIcon` + 顶栏 `ms-appx:///Assets/app-512.png`；SFX 图标由 `packaging/retarget-sfx-icon.py` 做 PE 资源手术替换 | 三处（exe 资源 / 标题栏·任务栏 / 界面）与安装器图标统一 |
+| 10 | 构建脚本 | `packaging/build-dist.sh` 用 vswhere + 版本排序自动探测 MSVC/WinSDK，publish 走 `-o dist/.stage/app`，支持 `--skip-publish` 只重打包 | 换机不用改脚本；探测与验证细节见 `docs/QA-REPORT-icon-pack.md` §10.9 |
+
+#### 10.1 构建与分发命令
+
+```bash
+# 1. 日常开发（不需要 AOT）
+dotnet build WingetManager.sln -c Release
+
+# 2. 出单文件安装包（AOT publish + SFX 打包，约 1.5 分钟）
+bash packaging/build-dist.sh
+
+# 3. 只重打包（已 publish 过，改完 install.cmd / sfx-config.txt 时用）
+bash packaging/build-dist.sh --skip-publish
+```
+
+产物 `dist/WingetManager-<版本>-win-x64-sfx.exe`：双击 → 提示 → 解压到临时目录 →
+`taskkill` 旧实例 → `robocopy /e /purge` 到 `%LOCALAPPDATA%\Programs\WingetManager` →
+启动应用 → 清理临时目录。升级失败（robocopy `errorlevel >= 8`）时不启动并给出日志。

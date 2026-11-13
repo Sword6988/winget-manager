@@ -390,9 +390,33 @@ start "" "%TARGET%\WingetManager.exe"
 | F3 运行中升级混合安装 | **已修复并复验 PASS** | 旧实例被结束、277 文件全等、新实例启动；失败分支中止 + 可诊断 |
 | F4 应用继承安装器权限 | 保留（P3） | 仍用 `start` 启动；如需降权需另做设计 |
 | F5 素材授权说明 | **已修复并复验 PASS** | `docs/icon-src/README.md` 已入库 |
-| F6 构建脚本硬编码工具链 | 保留（P3） | `build-dist.sh` 仍写死 MSVC 14.44.35207 / WinSDK 10.0.26100.0 |
+| F6 构建脚本硬编码工具链 | **已修复（工程师侧，见 §10.9）** | `build-dist.sh` 改为 vswhere + 版本排序自动探测 MSVC / WinSDK，publish 输出改走 `-o` 暂存目录 |
 
 ### 10.8 第 2 轮路由判定
 
 **NoOne —— F1 / F3 / F5 全部通过，无需工程师再修。** 剩余 F2 / F4 / F6 为 P3 优化项，建议留待后续版本。
+
+### 10.9 收尾打磨（工程师侧，2026-11-13 晚）
+
+**F6 已修复**：`packaging/build-dist.sh` 不再写死工具链，改为自动探测，并新增 `--skip-publish` 快路径。
+
+- MSVC：`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64` → `VC\Tools\MSVC` 下按 `sort -V` 取最高版本；vswhere 缺失时回退到常见安装位置。
+- WinSDK：`Windows Kits\10\Include` 下取「`Include\<v>\um` + `Lib\<v>\um\x64` + `bin\<v>\x64\rc.exe`」齐全的最高版本。
+  （修正过一个探测误判：`cl.exe` 属于 MSVC，Windows Kits 侧真正用到的是 `rc.exe`，早期实现按 `cl.exe` 判断会漏检。）
+- publish 输出改为 `-o dist/.stage/app`，脚本不再依赖 `bin/<cfg>/<tfm>/win-x64/publish` 这种拼接路径；`dist/` 已在 `.gitignore` 内。
+- 7-Zip / dotnet 均自动定位，可用 `SEVENZIP` / `DOTNET` / `MSVC_DIR` / `WINSDK_DIR` / `WINSDK_VER` / `STAGE_DIR` 覆盖。
+
+验证：
+
+| 用例 | 结果 |
+|---|---|
+| `--skip-publish` 用旧 publish 目录重打包 | 产物与修改前 **逐字节一致**（`cmp` 通过，23,502,283 B）——证明脚本重构未改变打包语义 |
+| 完整构建（自动探测工具链） | PASS，探测到 `MSVC 14.44.35207` / `WinSDK 10.0.26100.0`，AOT 发布 → 打包全链路 1m32s |
+| 新产物图标 | `app.ico` 7 帧全部能在 SFX 中逐字节命中（F1 未回归） |
+| 内层 `WingetManager.exe` | 10,163,712 B，7 帧图标命中，与上一版同尺寸（差异仅来自 AOT 非确定性构建哈希，源码未变） |
+
+**F2 / F4 维持保留**，理由记录如下（均属 P3，且改动收益低于引入风险）：
+
+- F2（`%TEMP%\7zSxxxx` 空目录壳）：内容已被 7zSD 清空、0 文件 0 字节。若在 `install.cmd` 末尾追加延时 `rd`，会与 7zSD 自己的清理序列并发执行，存在竞态风险（可能删到 SFX 仍在使用的目录）；本轮复查时现场已无残留空壳（0 个），不建议为纯观感引入竞态。
+- F4（应用继承安装器权限）：`start` 让 SFX 立即返回以便尽快清临时目录，是当前管线的前提；降权需要改启动方式并重新做安装实测，未验证的启动路径不宜直接上线，留待下一版配 QA 用例一起做。
 
