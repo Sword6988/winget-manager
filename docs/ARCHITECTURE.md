@@ -612,3 +612,15 @@ graph TD
     T05 --> T06
     T06 --> T07[T07 测试收尾+AOT 发布验收]
 ```
+
+### 10. 实现落地记录（T01–T07 与设计的差异）
+
+| # | 设计/文档原口径 | 实际落地 | 原因 |
+|---|---|---|---|
+| 1 | §5 UNCLEAR#1：`PublishSingleFile` + 收拢原生 DLL | **放弃单文件**，接受「exe + WinAppSDK 自包含 DLL」（win-x64 共约 130 MB，其中 exe 约 10 MB） | Native AOT 与 `PublishSingleFile` 互斥（SDK 明确报错，见 §1.4） |
+| 2 | §5 UNCLEAR#2：钉死 WinAppSDK 版本 | `Microsoft.WindowsAppSDK 1.7.251107005`（已钉死） | AOT 对小版本敏感 |
+| 3 | P0-21：运行库角标用 `InfoBadge` | 等价视觉的文本徽标（Border + TextBlock「运行库」） | `InfoBadge` 只支持数字/图标，不支持任意文本 |
+| 4 | AOT 策略 1：布尔 → Visibility 转换 | `{x:Bind app:UiConverters.VisibleIf(...)}` 静态函数绑定 | `IValueConverter` 走 `StaticResource` 运行时查找，AOT 高风险面 |
+| 5 | §2 文件列表：`ViewModels/CatalogFilter.cs` | 谓词落位 `Core/Services/FilterEngine.cs`（文档已注明） | 纯逻辑可测 |
+| 6 | 本机 AOT 链接 | `IlcUseEnvironmentalTools=true` + 手工拼 MSVC/SDK 环境变量 | `vswhere`/`vcvarsall.bat` 依赖 reg.exe，在受限环境不可用；正常开发机无需此参数 |
+| 7 | — | 导出按钮防重入（`CanExport`）、Ctrl+A 检测搜索框焦点、窗口越界钳制、`FileSavePicker` 失败回退默认路径确认 | 交互健壮性补强，语义与 PRD 一致 |
