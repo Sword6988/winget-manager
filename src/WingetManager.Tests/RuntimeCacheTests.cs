@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using WingetManager.Infra;
 using WingetManager.Services;
 using Xunit;
 
@@ -18,10 +19,13 @@ public sealed class RuntimeCacheTests
         return Path.Combine(dir, name);
     }
 
+    /// <summary>临时日志：用例会触发损坏/schema 回退的 WARN，注入独立文件避免写进真实 app.log。</summary>
+    private static LogService TempLog() => new(TempFile("test.log"));
+
     [Fact]
     public void Get_ReturnsNullWhenCacheEmpty()
     {
-        var cache = new RuntimeCache(TempFile("metadata-cache.json"));
+        var cache = new RuntimeCache(TempFile("metadata-cache.json"), TempLog());
 
         Assert.Null(cache.Get("Microsoft.VSTOR"));
         Assert.Equal(0, cache.Count);
@@ -31,7 +35,7 @@ public sealed class RuntimeCacheTests
     public void Put_WritesSchemaOneAndReloadsFromDisk()
     {
         var path = TempFile("metadata-cache.json");
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
 
         cache.Put("Microsoft.VSTOR", true);
 
@@ -48,20 +52,20 @@ public sealed class RuntimeCacheTests
         Assert.False(string.IsNullOrWhiteSpace(checkedAt.GetString()));
 
         // 新实例读同一份文件
-        Assert.True(new RuntimeCache(path).Get("Microsoft.VSTOR"));
+        Assert.True(new RuntimeCache(path, TempLog()).Get("Microsoft.VSTOR"));
     }
 
     [Fact]
     public void Put_FalseIsPersistedUnlikeMissingEntry()
     {
         var path = TempFile("metadata-cache.json");
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
 
         cache.Put("Git.Git", false);
 
         Assert.False(cache.Get("Git.Git"));
         Assert.Null(cache.Get("Unknown.App"));
-        Assert.False(new RuntimeCache(path).Get("Git.Git"));
+        Assert.False(new RuntimeCache(path, TempLog()).Get("Git.Git"));
     }
 
     [Fact]
@@ -70,7 +74,7 @@ public sealed class RuntimeCacheTests
         var path = TempFile("metadata-cache.json");
         File.WriteAllText(path, "{\"schema\": 99, \"entries\": {\"a.b\": {\"dep\": true, \"checkedAt\": \"x\"}}}");
 
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
 
         Assert.Null(cache.Get("a.b"));
         Assert.Equal(0, cache.Count);
@@ -82,13 +86,13 @@ public sealed class RuntimeCacheTests
         var path = TempFile("metadata-cache.json");
         File.WriteAllText(path, "{\"schema\": 1, \"entries\": {\"x\": tr");
 
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
 
         Assert.Null(cache.Get("microsoft.vstor"));
 
         // 损坏后 put 应重建出合法文件
         cache.Put("a.b", false);
-        Assert.False(new RuntimeCache(path).Get("a.b"));
+        Assert.False(new RuntimeCache(path, TempLog()).Get("a.b"));
     }
 
     [Fact]
@@ -100,7 +104,7 @@ public sealed class RuntimeCacheTests
             "{\"schema\":1,\"entries\":{\"good.app\":{\"dep\":true,\"checkedAt\":\"2026-01-01T00:00:00+08:00\"},"
             + "\"bad.app\":{\"dep\":\"yes\",\"checkedAt\":\"x\"},\"nested.app\":42}}");
 
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
 
         Assert.True(cache.Get("good.app")); // 好条目留下（单条坏掉不连坐整份缓存）
         Assert.Null(cache.Get("bad.app"));
@@ -118,7 +122,7 @@ public sealed class RuntimeCacheTests
             + "      \"checkedAt\": \"2026-11-03T14:00:00+08:00\"\n    },\n"
             + "    \"rustlang.rustup\": {\n      \"dep\": false,\n      \"checkedAt\": \"2026-11-03T14:00:01+08:00\"\n    }\n  }\n}\n");
 
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
 
         Assert.True(cache.Get("Microsoft.VSTOR"));
         Assert.False(cache.Get("Rustlang.Rustup"));
@@ -129,7 +133,7 @@ public sealed class RuntimeCacheTests
     public void Save_ProducesPythonCompatibleShape()
     {
         var path = TempFile("metadata-cache.json");
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
         cache.Put("Microsoft.VSTOR", true);
 
         var text = File.ReadAllText(path);
@@ -144,7 +148,7 @@ public sealed class RuntimeCacheTests
     public void Put_UpdatesExistingEntry()
     {
         var path = TempFile("metadata-cache.json");
-        var cache = new RuntimeCache(path);
+        var cache = new RuntimeCache(path, TempLog());
 
         cache.Put("a.b", false);
         cache.Put("a.b", true);
@@ -156,7 +160,7 @@ public sealed class RuntimeCacheTests
     [Fact]
     public void Snapshot_ReturnsCopy()
     {
-        var cache = new RuntimeCache(TempFile("metadata-cache.json"));
+        var cache = new RuntimeCache(TempFile("metadata-cache.json"), TempLog());
         cache.Put("a.b", true);
 
         var snapshot = cache.Snapshot();

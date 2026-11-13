@@ -573,11 +573,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _selectionStore.Save(snapshot);
     }
 
-    /// <summary>刷新「已选 N 个」与组头按钮文案。</summary>
+    /// <summary>刷新「已选 N 个」与组头按钮文案（按当前列表内的已勾选计数）。</summary>
     private void RefreshSelectionState()
     {
-        SelectedCountText = "已选 " + _selected.Count.ToString(CultureInfo.InvariantCulture) + " 个";
-        HasSelection = _selected.Count > 0;
+        // 启动渲染落盘快照的窗口里 selection.json 可能含缓存快照之外的 ID（尚未剪枝），
+        // 直接用 _selected.Count 会短暂多算；按「当前列表内已勾选」计数与导出口径一致
+        // （SelectedPackages 也是 _packages 交集；稳态下 _selected ⊆ _packages，两者相等）。
+        var selectedCount = 0;
+        foreach (var package in _packages)
+        {
+            if (_selected.Contains(package.PackageIdentifier))
+            {
+                selectedCount++;
+            }
+        }
+
+        SelectedCountText = "已选 " + selectedCount.ToString(CultureInfo.InvariantCulture) + " 个";
+        HasSelection = selectedCount > 0;
         NotifyGroupsSelectionChanged();
     }
 
@@ -615,6 +627,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
 
             ApplySnapshot(cached, startEnrichment: false, pruneSelection: false);
+            // 渲染缓存快照没有剪枝，这里按「列表内已勾选」重算一次计数，
+            // 避免 selection.json 与缓存不同步时状态栏短暂多算
+            RefreshSelectionState();
             StatusText = string.Format(
                 CultureInfo.InvariantCulture,
                 "已加载上次扫描结果（{0}），正在后台刷新…",

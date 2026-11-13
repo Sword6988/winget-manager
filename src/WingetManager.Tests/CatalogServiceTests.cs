@@ -85,8 +85,11 @@ public sealed class CatalogServiceTests
                                                 FakeRepository? repository = null)
     {
         var repo = repository ?? new FakeRepository(listStdout);
-        return new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, cache);
+        return new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, cache, TempLog());
     }
+
+    /// <summary>临时日志：扫描用例会打「目录刷新完成」INFO，注入独立文件避免写进真实 app.log。</summary>
+    private static LogService TempLog() => new(TempFile("test.log"));
 
     // ── 分组三件套 ────────────────────────────────────────────────────
 
@@ -222,7 +225,7 @@ public sealed class CatalogServiceTests
     [Fact]
     public async Task BuildSnapshot_MetadataOnlyOverridesWhenTrue()
     {
-        var cache = new RuntimeCache(TempFile("mc-priority.json"));
+        var cache = new RuntimeCache(TempFile("mc-priority.json"), TempLog());
         cache.Put("Vendor.VcRedist.AT", true);   // 关键词 T + 缓存 T
         cache.Put("Vendor.VcRedist.AF", false);  // 关键词 T + 缓存 F → 仍 T
         cache.Put("Vendor.App.CT", true);        // 关键词 F + 缓存 T → T
@@ -251,7 +254,7 @@ public sealed class CatalogServiceTests
     [Fact]
     public void PendingMetadataIds_SkipsKeywordDependenciesAndCached()
     {
-        var cache = new RuntimeCache(TempFile("mc-pending-kw.json"));
+        var cache = new RuntimeCache(TempFile("mc-pending-kw.json"), TempLog());
         cache.Put("Vendor.App.Done", false);
 
         var packages = new List<Package>
@@ -263,7 +266,7 @@ public sealed class CatalogServiceTests
         };
         var snapshot = new CatalogSnapshot { Packages = packages };
 
-        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), new FakeRepository(string.Empty), cache);
+        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), new FakeRepository(string.Empty), cache, TempLog());
         var pending = service.PendingMetadataIds(snapshot);
 
         Assert.Equal(new[] { "Microsoft.VSTOR" }, pending);
@@ -276,7 +279,7 @@ public sealed class CatalogServiceTests
         {
             Packages = new List<Package> { new() { PackageIdentifier = "Vendor.App", Reinstallable = true } },
         };
-        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), new FakeRepository(string.Empty));
+        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), new FakeRepository(string.Empty), null, TempLog());
 
         Assert.Empty(service.PendingMetadataIds(snapshot));
     }
@@ -287,7 +290,7 @@ public sealed class CatalogServiceTests
     public async Task GetCatalog_SecondCallHitsCache()
     {
         var repo = new FakeRepository(string.Empty);
-        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo);
+        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, null, TempLog());
 
         var first = await service.GetCatalogAsync(force: false, CancellationToken.None, "1.0");
         var second = await service.GetCatalogAsync(force: false, CancellationToken.None, "1.0");
@@ -300,7 +303,7 @@ public sealed class CatalogServiceTests
     public async Task GetCatalog_ForceRescans()
     {
         var repo = new FakeRepository(string.Empty);
-        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo);
+        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, null, TempLog());
 
         await service.GetCatalogAsync(force: false, CancellationToken.None, "1.0");
         await service.GetCatalogAsync(force: true, CancellationToken.None, "1.0");
@@ -312,7 +315,7 @@ public sealed class CatalogServiceTests
     public async Task GetCatalog_ZeroTtlAlwaysRescans()
     {
         var repo = new FakeRepository(string.Empty);
-        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 0, 30), repo);
+        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 0, 30), repo, null, TempLog());
 
         await service.GetCatalogAsync(force: false, CancellationToken.None, "1.0");
         await service.GetCatalogAsync(force: false, CancellationToken.None, "1.0");
@@ -329,7 +332,7 @@ public sealed class CatalogServiceTests
         {
             ListException = new ScanCancelledException("扫描已取消"),
         };
-        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), repo);
+        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), repo, null, TempLog());
 
         await Assert.ThrowsAsync<ScanCancelledException>(
             () => service.BuildSnapshotAsync(CancellationToken.None));
@@ -342,7 +345,7 @@ public sealed class CatalogServiceTests
         var repo = new FakeRepository(string.Empty);
         cts.Cancel();
 
-        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), repo);
+        var service = new CatalogService(AppConfig.CreateForTests("fake-winget.exe"), repo, null, TempLog());
 
         await Assert.ThrowsAsync<ScanCancelledException>(
             () => service.BuildSnapshotAsync(cts.Token));

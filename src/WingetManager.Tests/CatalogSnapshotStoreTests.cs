@@ -219,7 +219,7 @@ public sealed class CatalogSnapshotStoreTests
         var store = new CatalogSnapshotStore(path, TempLog());
         var repo = new CatalogServiceTests.FakeRepository(listOutput);
         var service = new CatalogService(
-            AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, null, null, store);
+            AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, null, TempLog(), store);
 
         await service.GetCatalogAsync(force: false, CancellationToken.None, "1.0");
 
