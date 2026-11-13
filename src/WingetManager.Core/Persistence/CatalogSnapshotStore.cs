@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using WingetManager.Infra;
@@ -58,21 +59,51 @@ public sealed class CatalogSnapshotStore
             }
 
             var payload = JsonSerializer.Deserialize(text, AppJsonContext.Default.CatalogCacheFile);
-            if (payload is null
-                || payload.Schema != CatalogCacheFile.CurrentSchema
-                || payload.Snapshot is null
-                || payload.Snapshot.Packages.Count == 0)
+            if (payload is null || payload.Schema != CatalogCacheFile.CurrentSchema)
             {
-                _log.Warn("目录快照缓存不可用（schema={0}），本次启动回退为完整扫描",
+                // 口径说明：schema 字段<b>缺失</b>时按当前版本接受（DTO 属性初始化器兜底），
+                // 属于有意的宽松向前兼容；只要显式写出的值 ≠ 当前版本，整份作废。
+                _log.Warn("目录快照缓存 schema 不符（期望 {0}，实际 {1}），本次启动回退为完整扫描",
+                    CatalogCacheFile.CurrentSchema,
                     payload?.Schema.ToString() ?? "缺失");
                 return null;
             }
 
+            var snapshot = payload.Snapshot;
+            if (snapshot is null || snapshot.Packages is null || string.IsNullOrEmpty(snapshot.GeneratedAt))
+            {
+                // 显式 null 会覆盖 DTO 的属性初始化器（如 "packages": null），不能只判 Count
+                _log.Warn("目录快照缓存结构不完整（snapshot/packages/generatedAt 缺失或为 null），本次启动回退为完整扫描");
+                return null;
+            }
+
+            // 逐条清洗：null 元素、关键字段为 null 的条目直接剔除（手改文件 / 未来写入方
+            // 变更都可能产生）。调用方（MainViewModel 渲染、HashSet 比较器）会解引用
+            // PackageIdentifier / Name，这里保证交付出去的快照字段齐备且非 null。
+            var packages = new List<Package>(snapshot.Packages.Count);
+            foreach (var package in snapshot.Packages)
+            {
+                if (package is null || package.PackageIdentifier is null || package.Name is null)
+                {
+                    continue;
+                }
+
+                packages.Add(package);
+            }
+
+            if (packages.Count == 0)
+            {
+                _log.Warn("目录快照缓存没有有效包条目，本次启动回退为完整扫描");
+                return null;
+            }
+
+            snapshot.Packages = packages;
+
             _log.Info(
                 "已加载落盘快照：{0} 项（生成于 {1}），等待后台刷新",
-                payload.Snapshot.Packages.Count,
-                payload.Snapshot.GeneratedAt);
-            return payload.Snapshot;
+                packages.Count,
+                snapshot.GeneratedAt);
+            return snapshot;
         }
         catch (JsonException ex)
         {
@@ -87,6 +118,12 @@ public sealed class CatalogSnapshotStore
         catch (UnauthorizedAccessException ex)
         {
             _log.Warn("目录快照缓存读取失败，回退为完整扫描：{0}", ex.Message);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // 兜底：缓存读取链路上任何意外异常都只降级为「无缓存」，绝不打断启动
+            _log.Warn("目录快照缓存读取出现意外异常，回退为完整扫描：{0}", ex);
             return null;
         }
     }

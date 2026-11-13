@@ -25,6 +25,12 @@ public sealed class CatalogSnapshotStoreTests
         return Path.Combine(dir, name);
     }
 
+    /// <summary>临时日志：用例断言会触发 WARN/INFO，注入独立文件避免写进真实 app.log。</summary>
+    private static LogService TempLog()
+    {
+        return new LogService(TempFile("test.log"));
+    }
+
     private static CatalogSnapshot BuildSnapshot()
     {
         return new CatalogSnapshot
@@ -67,13 +73,13 @@ public sealed class CatalogSnapshotStoreTests
     public void Save_ThenLoad_RoundTripsSnapshot()
     {
         var path = TempFile("catalog-cache.json");
-        var store = new CatalogSnapshotStore(path);
+        var store = new CatalogSnapshotStore(path, TempLog());
         var snapshot = BuildSnapshot();
 
         store.Save(snapshot);
 
         Assert.True(File.Exists(path));
-        var loaded = new CatalogSnapshotStore(path).Load();
+        var loaded = new CatalogSnapshotStore(path, TempLog()).Load();
         Assert.NotNull(loaded);
 
         var back = loaded!;
@@ -95,7 +101,7 @@ public sealed class CatalogSnapshotStoreTests
     public void Save_OverwritesPreviousSnapshot()
     {
         var path = TempFile("catalog-cache.json");
-        var store = new CatalogSnapshotStore(path);
+        var store = new CatalogSnapshotStore(path, TempLog());
 
         var first = BuildSnapshot();
         first.GeneratedAt = "2026-11-01T08:00:00+0800";
@@ -105,7 +111,7 @@ public sealed class CatalogSnapshotStoreTests
         second.GeneratedAt = "2026-11-02T09:00:00+0800";
         store.Save(second);
 
-        var loaded = new CatalogSnapshotStore(path).Load();
+        var loaded = new CatalogSnapshotStore(path, TempLog()).Load();
         Assert.NotNull(loaded);
         Assert.Equal("2026-11-02T09:00:00+0800", loaded!.GeneratedAt);
     }
@@ -114,7 +120,7 @@ public sealed class CatalogSnapshotStoreTests
     public void Save_WritesSchemaFieldWithCurrentVersion()
     {
         var path = TempFile("catalog-cache.json");
-        new CatalogSnapshotStore(path).Save(BuildSnapshot());
+        new CatalogSnapshotStore(path, TempLog()).Save(BuildSnapshot());
 
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
@@ -127,7 +133,7 @@ public sealed class CatalogSnapshotStoreTests
     [Fact]
     public void Load_MissingFile_ReturnsNull()
     {
-        Assert.Null(new CatalogSnapshotStore(TempFile("absent.json")).Load());
+        Assert.Null(new CatalogSnapshotStore(TempFile("absent.json"), TempLog()).Load());
     }
 
     [Fact]
@@ -136,7 +142,7 @@ public sealed class CatalogSnapshotStoreTests
         var path = TempFile("catalog-cache.json");
         File.WriteAllText(path, string.Empty);
 
-        Assert.Null(new CatalogSnapshotStore(path).Load());
+        Assert.Null(new CatalogSnapshotStore(path, TempLog()).Load());
     }
 
     [Fact]
@@ -145,7 +151,7 @@ public sealed class CatalogSnapshotStoreTests
         var path = TempFile("catalog-cache.json");
         File.WriteAllText(path, "{\"schema\": 1, \"snapshot\": {\"generatedAt\": \"x");
 
-        Assert.Null(new CatalogSnapshotStore(path).Load());
+        Assert.Null(new CatalogSnapshotStore(path, TempLog()).Load());
     }
 
     [Fact]
@@ -159,7 +165,7 @@ public sealed class CatalogSnapshotStoreTests
                 new CatalogCacheFile { Schema = 99, Snapshot = snapshot },
                 AppJsonContext.Default.CatalogCacheFile));
 
-        Assert.Null(new CatalogSnapshotStore(path).Load());
+        Assert.Null(new CatalogSnapshotStore(path, TempLog()).Load());
     }
 
     [Fact]
@@ -168,7 +174,7 @@ public sealed class CatalogSnapshotStoreTests
         var path = TempFile("catalog-cache.json");
         File.WriteAllText(path, "{\"schema\": 1, \"snapshot\": {\"generatedAt\": \"2026-11-03T14:00:00+0800\"}}");
 
-        Assert.Null(new CatalogSnapshotStore(path).Load());
+        Assert.Null(new CatalogSnapshotStore(path, TempLog()).Load());
     }
 
     [Fact]
@@ -177,7 +183,7 @@ public sealed class CatalogSnapshotStoreTests
         var path = TempFile("catalog-cache.json");
         File.WriteAllText(path, "{\"schema\": 1, \"snapshot\": null}");
 
-        Assert.Null(new CatalogSnapshotStore(path).Load());
+        Assert.Null(new CatalogSnapshotStore(path, TempLog()).Load());
     }
 
     [Fact]
@@ -186,7 +192,7 @@ public sealed class CatalogSnapshotStoreTests
         var path = TempFile("catalog-cache.json");
         File.WriteAllText(path, "这不是 JSON");
 
-        Assert.Null(new CatalogSnapshotStore(path).Load());
+        Assert.Null(new CatalogSnapshotStore(path, TempLog()).Load());
     }
 
     [Fact]
@@ -196,7 +202,7 @@ public sealed class CatalogSnapshotStoreTests
         var path = TempFile("occupied.json");
         Directory.CreateDirectory(path);
 
-        var store = new CatalogSnapshotStore(path);
+        var store = new CatalogSnapshotStore(path, TempLog());
         store.Save(BuildSnapshot()); // 不抛即通过
     }
 
@@ -210,7 +216,7 @@ public sealed class CatalogSnapshotStoreTests
             "Google Chrome   Google.Chrome                 1.0      winget\n";
 
         var path = TempFile("catalog-cache.json");
-        var store = new CatalogSnapshotStore(path);
+        var store = new CatalogSnapshotStore(path, TempLog());
         var repo = new CatalogServiceTests.FakeRepository(listOutput);
         var service = new CatalogService(
             AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, null, null, store);
@@ -218,7 +224,7 @@ public sealed class CatalogSnapshotStoreTests
         await service.GetCatalogAsync(force: false, CancellationToken.None, "1.0");
 
         Assert.True(File.Exists(path));
-        var loaded = new CatalogSnapshotStore(path).Load();
+        var loaded = new CatalogSnapshotStore(path, TempLog()).Load();
         Assert.NotNull(loaded);
 
         var package = Assert.Single(loaded!.Packages);

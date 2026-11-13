@@ -586,25 +586,35 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// 只在「有 winget、有有效缓存」时生效；损坏/缺失由 <see cref="CatalogSnapshotStore"/>
     /// 返回 null，静默回退到原有完整扫描路径。渲染时跳过元数据核查（后台刷新马上会
     /// 全量重扫并重新起富化）。统计与「上次扫描时间」一律按快照里的 GeneratedAt 显示。
+    ///
+    /// 这里再套一层 try/catch（防御纵深）：本方法在构造函数里跑，缓存链路上任何
+    /// 意外异常最多退回「无缓存完整扫描」，绝不允许打断窗口构造。
     /// </summary>
     private void TryRestoreSnapshotFromDisk()
     {
-        if (ShowGuide)
+        try
         {
-            return;
-        }
+            if (ShowGuide)
+            {
+                return;
+            }
 
-        var cached = _snapshotStore.Load();
-        if (cached is null)
+            var cached = _snapshotStore.Load();
+            if (cached is null)
+            {
+                return;
+            }
+
+            ApplySnapshot(cached, startEnrichment: false);
+            StatusText = string.Format(
+                CultureInfo.InvariantCulture,
+                "已加载上次扫描结果（{0}），正在后台刷新…",
+                FormatGeneratedAtDisplay(cached.GeneratedAt));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            return;
+            _log.Warn("加载落盘快照失败，本次启动按无缓存处理：{0}", ex);
         }
-
-        ApplySnapshot(cached, startEnrichment: false);
-        StatusText = string.Format(
-            CultureInfo.InvariantCulture,
-            "已加载上次扫描结果（{0}），正在后台刷新…",
-            FormatGeneratedAtDisplay(cached.GeneratedAt));
     }
 
     /// <summary>
@@ -613,15 +623,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     /// <param name="generatedAt">快照生成时间原文。</param>
     /// <returns>展示用短文本。</returns>
-    private static string FormatGeneratedAtDisplay(string generatedAt)
+    private static string FormatGeneratedAtDisplay(string? generatedAt)
     {
-        if (generatedAt.Length >= 16 && generatedAt[10] == 'T'
-            && char.IsDigit(generatedAt[0]) && char.IsDigit(generatedAt[11]))
+        if (!string.IsNullOrEmpty(generatedAt) && generatedAt.Length >= 16
+            && generatedAt[10] == 'T' && char.IsDigit(generatedAt[0]) && char.IsDigit(generatedAt[11]))
         {
             return generatedAt[..10] + " " + generatedAt[11..16];
         }
 
-        return generatedAt;
+        return generatedAt ?? string.Empty;
     }
 
     /// <summary>从 selection.json 恢复勾选（损坏文件由 SelectionStore 兜底成空集）。</summary>
