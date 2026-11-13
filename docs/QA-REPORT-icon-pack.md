@@ -444,3 +444,29 @@ start "" "%TARGET%\WingetManager.exe"
 
 快速路径里仍保留一次**优雅** `taskkill`（不带 `/f`）：双击已装同版本、且应用正在运行时，
 语义是「重开一个干净的窗口」，与旧版双击行为一致，不会叠出第二个实例。
+
+### 10.11 便携版（不落盘）验证（工程师侧，2026-11-13 19:55）
+
+需求：「更想要完全不落盘的绿色版」。新增 `--portable` 构建模式，产物
+`dist/WingetManager-3.0.0-win-x64-portable.exe`（16.3 MB），与安装版共用载荷，
+只换引导脚本 `launch-portable.cmd` + `sfx-config-portable.txt`（`RunProgram="launch-portable.cmd"`）。
+
+真机端到端实测（直接双击运行，非影子目录）：
+
+| 检查项 | 结果 |
+|---|---|
+| 运行位置 | `Get-Process.Path` = `...\Temp\7zS85791E92\WingetManager.exe` → **确认从临时目录运行**，未复制到任何常驻目录 |
+| 临时目录内容 | 277 个文件（完整载荷） |
+| 已安装目录 | `%LOCALAPPDATA%\Programs\WingetManager\WingetManager.exe` mtime 保持 19:02:46 → **未被触碰** |
+| 功能 | 日志：`已加载落盘快照：172 项` → `目录刷新完成: 172 项（可重装 82）`，窗口标题「Winget 软件管家」正常 |
+| 关窗后清理 | 进程退出 → 7zS 目录**被整体删除**，SFX 退出码 0，`%TEMP%` 下非空 7zS 目录剩 0 个 |
+| 代价 | 解压 72 MB 实测 **2882 ms**（每次启动），比安装版慢约 3 秒 |
+
+两个易踩的坑（已写进 `launch-portable.cmd` 注释）：
+
+1. 引导脚本必须先 `cd /d "%TEMP%"` 离开解压目录——否则该目录是进程 cwd，7zSD 删不掉（安装版历史上那批空 `7zSxxxx` 壳子正是这个原因）；
+2. 必须 `start "" /wait`，否则 7zSD 认为 `RunProgram` 已返回，会在应用运行中删除载荷。
+
+用户数据仍留在 `%LOCALAPPDATA%\WingetManager`（勾选 / 元数据缓存 / 快照 / 日志），
+因此便携版与安装版**共享同一份状态**：换着用不会丢勾选，也仍有秒开快照。
+若未来要做"连数据都可携带"，需给 `AppPaths` 加可重定向的数据根（环境变量或 exe 同目录探测），属应用侧改动。

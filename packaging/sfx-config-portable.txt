@@ -1,0 +1,4 @@
+;!@Install@!UTF-8!
+Title="Winget 软件管家 @VERSION@ (便携版)"
+RunProgram="launch-portable.cmd"
+;!@InstallEnd@!

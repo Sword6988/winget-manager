@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
-# 单文件分发产物构建脚本（7-Zip SFX 自解压安装器）
+# 单文件分发产物构建脚本（7-Zip SFX 自解压）
 #
-# 产物：dist/WingetManager-<版本>-win-x64-sfx.exe
-#   双击 → 确认 → 解压到临时目录 → 拷贝到 %LOCALAPPDATA%\Programs\WingetManager
-#   → 启动应用 → 自动清理临时目录。解压后的目录结构与 publish 完全一致。
+# 两种产物（同一份载荷，只差引导脚本与配置）：
+#
+#   安装版  dist/WingetManager-<版本>-win-x64-sfx.exe
+#     双击 → 解压到临时目录 → 拷贝到 %LOCALAPPDATA%\Programs\WingetManager
+#     → 启动 → 清理临时目录。装过同版本则跳过拷贝直接启动。
+#
+#   便携版  dist/WingetManager-<版本>-win-x64-portable.exe
+#     双击 → 解压到 %TEMP%\7zSxxxx → **直接在临时目录里运行** → 关窗后
+#     整个解压目录被删除，程序文件零残留（用户数据仍在
+#     %LOCALAPPDATA%\WingetManager）。代价是每次启动多花 1~2 秒解压。
 #
 # 前置条件：
 #   - dotnet SDK 8+（AOT publish 需 MSVC/WinSDK 工具链，见 ARCHITECTURE.md）
@@ -16,8 +23,10 @@
 #     （该脚本会追加新节，重复执行会不断增大模块体积）。
 #
 # 用法：
-#   bash packaging/build-dist.sh                 完整构建（publish + 打包）
-#   bash packaging/build-dist.sh --skip-publish  复用上次 publish 产物，只重打包
+#   bash packaging/build-dist.sh                  构建安装版（publish + 打包）
+#   bash packaging/build-dist.sh --portable       构建便携版
+#   bash packaging/build-dist.sh both             两个都出
+#   bash packaging/build-dist.sh --skip-publish   复用上次 publish 产物，只重打包
 #
 # 覆盖项（可选环境变量）：
 #   DOTNET / SEVENZIP / MSVC_DIR / WINSDK_DIR / WINSDK_VER / STAGE_DIR
@@ -30,11 +39,14 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 SKIP_PUBLISH=0
+MODES="install"
 for arg in "$@"; do
     case "$arg" in
         --skip-publish) SKIP_PUBLISH=1 ;;
-        -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
-        *) echo "未知参数：$arg（仅支持 --skip-publish）" >&2; exit 2 ;;
+        --portable) MODES="portable" ;;
+        both) MODES="install portable" ;;
+        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+        *) echo "未知参数：$arg（支持 --portable / both / --skip-publish）" >&2; exit 2 ;;
     esac
 done
 
@@ -42,12 +54,11 @@ VERSION="$(grep -oP '(?<=public const string Version = ")[^"]+' src/WingetManage
 [ -n "$VERSION" ] || { echo "无法从 App.xaml.cs 解析版本号"; exit 1; }
 
 SFX_MODULE="packaging/7zSD.sfx"
-SFX_CONFIG="packaging/sfx-config.txt"
 OUT_DIR="dist"
 STAGE_DIR="${STAGE_DIR:-$OUT_DIR/.stage/app}"
-OUT_FILE="$OUT_DIR/WingetManager-$VERSION-win-x64-sfx.exe"
 
 mkdir -p "$OUT_DIR"
+
 
 # ── 工具定位辅助 ────────────────────────────────────────────────────
 win_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi; }
@@ -175,20 +186,43 @@ find "$STAGE_DIR" -maxdepth 1 -name '*.pdb' -type f -delete
 # 版本标记：install.cmd 用它判断"已装同版本 → 直接启动"，避免重复拷贝。
 printf '%s' "$VERSION" > "$STAGE_DIR/version.txt"
 
-# ── 2. 压缩 publish 目录内容（归档根即 publish 根）+ install.cmd ────
-ARCHIVE="$(mktemp -d)/payload.7z"
-CONFIG_RENDERED="$(dirname "$ARCHIVE")/sfx-config.txt"
-trap 'rm -rf "$(dirname "$ARCHIVE")"' EXIT
-sed "s/@VERSION@/$VERSION/" "$SFX_CONFIG" > "$CONFIG_RENDERED"
-( cd "$STAGE_DIR" && "$SEVENZIP" a -mx9 "$ARCHIVE" . > /dev/null )
-( cd packaging && "$SEVENZIP" a "$ARCHIVE" install.cmd > /dev/null )
+# ── 2/3. 打包一个 SFX ───────────────────────────────────────────────
+# $1 = 引导脚本（packaging/ 下）  $2 = 配置模板  $3 = 产物路径  $4 = 说明
+build_sfx() {
+    local launcher="$1" config="$2" out="$3" label="$4"
+    # 用仓库内的相对路径做临时目录：本环境的 mktemp -d 返回 C:\... 形式，
+    # rm 的安全包装器会拒绝"带盘符"的路径，导致清理失败（set -e 直接中断）。
+    local tmpdir archive rendered abs_archive
+    tmpdir="$OUT_DIR/.tmp"
+    rm -rf "$tmpdir"
+    mkdir -p "$tmpdir"
+    archive="$tmpdir/payload.7z"
+    rendered="$tmpdir/sfx-config.txt"
 
-# ── 3. 拼接 SFX：模块 + 配置(UTF-8 无 BOM) + 归档 ───────────────────
-cat "$SFX_MODULE" "$CONFIG_RENDERED" "$ARCHIVE" > "$OUT_FILE"
+    sed "s/@VERSION@/$VERSION/" "$config" > "$rendered"
+    abs_archive="$(pwd)/$archive"
+    ( cd "$STAGE_DIR" && "$SEVENZIP" a -mx9 "$abs_archive" . > /dev/null )
+    ( cd packaging && "$SEVENZIP" a "$abs_archive" "$launcher" > /dev/null )
+    cat "$SFX_MODULE" "$rendered" "$archive" > "$out"
 
-echo "════════════════════════════════════════"
-echo "产物：$OUT_FILE"
-echo "载荷：$(du -sh "$STAGE_DIR" | cut -f1)（已剔除 pdb）"
-ls -lh "$OUT_FILE"
-echo "校验归档条目（应含 install.cmd / version.txt / WingetManager.exe，不含 pdb）："
-"$SEVENZIP" l "$ARCHIVE" | grep -E "install\.cmd|version\.txt|WingetManager\.exe|\.pdb|files" | head -8
+    echo "════════════════════════════════════════"
+    echo "[$label] 产物：$out"
+    echo "[$label] 载荷：$(du -sh "$STAGE_DIR" | cut -f1)（已剔除 pdb）"
+    ls -lh "$out"
+    echo "[$label] 归档条目校验（应含 $launcher / WingetManager.exe，不含 pdb）："
+    "$SEVENZIP" l "$archive" 2>/dev/null | grep -E "$launcher|version\.txt|WingetManager\.exe|\.pdb|files" | head -6 || true
+    rm -rf "$tmpdir"
+}
+
+for MODE in $MODES; do
+    case "$MODE" in
+        install)
+            build_sfx install.cmd packaging/sfx-config.txt \
+                "$OUT_DIR/WingetManager-$VERSION-win-x64-sfx.exe" "安装版"
+            ;;
+        portable)
+            build_sfx launch-portable.cmd packaging/sfx-config-portable.txt \
+                "$OUT_DIR/WingetManager-$VERSION-win-x64-portable.exe" "便携版"
+            ;;
+    esac
+done

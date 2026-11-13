@@ -634,22 +634,33 @@ graph TD
 # 1. 日常开发（不需要 AOT）
 dotnet build WingetManager.sln -c Release
 
-# 2. 出单文件安装包（AOT publish + SFX 打包，约 1.5 分钟）
+# 2. 出安装版单文件包（AOT publish + SFX 打包，约 1.5 分钟）
 bash packaging/build-dist.sh
 
-# 3. 只重打包（已 publish 过，改完 install.cmd / sfx-config.txt 时用）
-bash packaging/build-dist.sh --skip-publish
+# 3. 出便携版（不落盘）单文件包
+bash packaging/build-dist.sh --portable
+
+# 4. 两个都出
+bash packaging/build-dist.sh both
+
+# 5. 只重打包（已 publish 过，改完 install.cmd / launch-portable.cmd / sfx-config*.txt 时用）
+bash packaging/build-dist.sh both --skip-publish
 ```
 
-产物 `dist/WingetManager-<版本>-win-x64-sfx.exe`：**双击即用，无确认框**
-（`sfx-config.txt` 里不配 `BeginPrompt`）——
+两个产物共用同一份载荷（72 MB，已剔除 pdb），只差引导脚本与 SFX 配置：
 
-1. 解压到临时目录，`install.cmd` 先读载荷里的 `version.txt` 与安装目录里的同名文件比对；
-2. **版本一致 → 快速路径**：不 `taskkill`、不 `robocopy`，直接 `start` 安装目录里的 exe，
-   所以第二次起双击同一个 exe 等同于"打开应用"（毫秒级）；
-3. **版本不同 / 未安装 → 完整路径**：`taskkill` 旧实例 → 删遗留 `install.cmd` 与 `*.pdb` →
-   `robocopy /e /purge` 到 `%LOCALAPPDATA%\Programs\WingetManager` → 启动 → 清理临时目录；
-4. 升级失败（robocopy `errorlevel >= 8`）时不启动，改为打开日志。
+| 产物 | 引导脚本 | 行为 |
+|---|---|---|
+| `dist/…-win-x64-sfx.exe`（安装版） | `install.cmd` | **双击即用，无确认框**：解压到临时目录 → 比对 `version.txt` → 版本一致直接启动（毫秒级），不一致则 `taskkill` + `robocopy /e /purge` 到 `%LOCALAPPDATA%\Programs\WingetManager` → 启动 → 清临时目录；失败（`errorlevel >= 8`）不启动、改为打开日志 |
+| `dist/…-win-x64-portable.exe`（便携版） | `launch-portable.cmd` | **不落盘**：解压到 `%TEMP%\7zSxxxx` 后**直接在临时目录里运行**，`start /wait` 等应用退出，7zSD 随后删除整个解压目录；程序文件零残留，代价是每次启动多 ~3 秒解压 |
+
+便携版的两个关键点（写在 `launch-portable.cmd` 注释里）：
+
+1. 必须 `cd /d "%TEMP%"` 先离开解压目录，否则该目录仍是进程 cwd，7zSD 删不掉（安装版那批空 `%TEMP%\7zSxxxx` 壳子就是这么来的）；
+2. 必须 `start "" /wait`，否则 7zSD 认为 `RunProgram` 已结束、会在应用运行中删掉载荷。
+
+两个版本都**不把用户数据外移**：`selection.json` / `metadata-cache.json` / `catalog-cache.json` / `logs` 始终在
+`%LOCALAPPDATA%\WingetManager`（勾选状态与秒开快照因此跨版本、跨安装/便携共享）。
 
 载荷里不含 `WingetManager.pdb`（AOT 调试符号 58 MB，占原载荷 45%），
 `install.cmd` 的 `/xf *.pdb` + 显式 `del` 会把旧安装里的 pdb 一并清掉。
