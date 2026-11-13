@@ -5,14 +5,326 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:app="using:WingetManager.AppServices"
+    xmlns:vm="using:WingetManager.ViewModels"
     mc:Ignorable="d"
     Title="Winget 软件管家">
 
+  <!--
+    单页三行布局（PRD「UI Design Draft」）：
+      Row0 顶栏：标题 / 搜索 / 导出 + 分组胶囊 / 仅看已选 / 全选 / 反选
+      Row1 列表：CollectionViewSource 分组的 ListView（三组固定顺序，空组无组头）
+      Row2 底栏：进度条 + 状态/计时 + 统计卡
+
+    AOT 约束：全文件只用 x:Bind（编译期绑定），布尔转 Visibility 用静态函数绑定
+    （app:UiConverters.VisibleIf），既避免反射型 IValueConverter 查找，也不需要转换器资源。
+  -->
   <Grid x:Name="RootGrid" Background="Transparent">
-    <TextBlock Text="Winget 软件管家"
-               Margin="32"
-               FontSize="20"
-               VerticalAlignment="Center"
-               HorizontalAlignment="Center" />
+    <Grid.KeyboardAccelerators>
+      <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnFocusSearchAccelerator" />
+      <KeyboardAccelerator Key="A" Modifiers="Control" Invoked="OnSelectAllAccelerator" />
+      <KeyboardAccelerator Key="E" Modifiers="Control" Invoked="OnExportAccelerator" />
+      <KeyboardAccelerator Key="F5" Invoked="OnRescanAccelerator" />
+      <KeyboardAccelerator Key="Escape" Invoked="OnEscapeAccelerator" />
+    </Grid.KeyboardAccelerators>
+
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- ═════════════════════ 顶栏 ═════════════════════ -->
+    <Grid Grid.Row="0" Padding="20,14,20,8" RowSpacing="10">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- 第一行：标题 + 搜索框 + 导出 -->
+      <Grid Grid.Row="0" ColumnSpacing="14">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <FontIcon Glyph="&#xE74C;" FontSize="18" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+          <TextBlock Text="Winget 软件管家" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <TextBox
+            x:Name="SearchBox"
+            Grid.Column="1"
+            VerticalAlignment="Center"
+            PlaceholderText="搜索软件：多关键词用空格分隔，支持 id: / name: 前缀"
+            Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+        <Button
+            Grid.Column="2"
+            MinWidth="132"
+            VerticalAlignment="Center"
+            Style="{StaticResource AccentButtonStyle}"
+            Command="{x:Bind ViewModel.ExportCommand}"
+            IsEnabled="{x:Bind ViewModel.CanExport, Mode=OneWay}"
+            ToolTipService.ToolTip="导出 apps.json + 恢复脚本 + 无法自动重装清单（Ctrl+E）">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <FontIcon Glyph="&#xE74E;" FontSize="14" />
+            <TextBlock Text="导出配置" />
+          </StackPanel>
+        </Button>
+      </Grid>
+
+      <!-- 第二行：分组胶囊 + 仅看已选 + 全选 / 反选 -->
+      <Grid Grid.Row="1" ColumnSpacing="12">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <SelectorBar
+            x:Name="GroupSelector"
+            Grid.Column="0"
+            SelectionChanged="OnGroupSelectionChanged">
+          <SelectorBarItem Text="全部" />
+          <SelectorBarItem Text="软件" />
+          <SelectorBarItem Text="运行库" />
+          <SelectorBarItem Text="winget 不支持" />
+        </SelectorBar>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <ToggleButton
+              Content="仅看已选"
+              IsChecked="{x:Bind ViewModel.OnlySelected, Mode=TwoWay}"
+              ToolTipService.ToolTip="只显示已勾选的软件；本次会话生效" />
+          <Button Content="全选" Command="{x:Bind ViewModel.SelectAllCommand}"
+                  ToolTipService.ToolTip="只勾选当前可见的可勾选项（Ctrl+A）" />
+          <Button Content="反选" Command="{x:Bind ViewModel.InvertSelectionCommand}"
+                  ToolTipService.ToolTip="只反转当前可见的可勾选项" />
+          <Button Content="清空" Command="{x:Bind ViewModel.ClearSelectionCommand}"
+                  ToolTipService.ToolTip="清空全部勾选" />
+          <Button Content="{x:Bind ViewModel.ScanButtonText, Mode=OneWay}"
+                  Command="{x:Bind ViewModel.RescanOrCancelCommand}"
+                  MinWidth="96"
+                  ToolTipService.ToolTip="F5 重新扫描；扫描中再点即取消" />
+        </StackPanel>
+      </Grid>
+    </Grid>
+
+    <!-- ═════════════════════ 列表 ═════════════════════ -->
+    <Grid Grid.Row="1">
+      <ListView
+          x:Name="PackageList"
+          ItemsSource="{x:Bind GroupedSource.View}"
+          SelectionMode="None"
+          IsItemClickEnabled="False"
+          Padding="14,0,14,6"
+          ItemContainerTransitions="{x:Null}"
+          Visibility="{x:Bind app:UiConverters.CollapsedIf(ViewModel.ShowGuide), Mode=OneWay}">
+
+        <ListView.GroupStyle>
+          <GroupStyle>
+            <GroupStyle.HeaderTemplate>
+              <DataTemplate x:DataType="vm:PackageGroup">
+                <Grid Padding="4,12,4,6" ColumnSpacing="12">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock
+                        Text="{x:Bind CountText}"
+                        FontSize="12"
+                        VerticalAlignment="Center"
+                        Foreground="{ThemeResource AppSubtleTextBrush}" />
+                  </StackPanel>
+                  <Button
+                      Grid.Column="1"
+                      Content="{x:Bind ToggleGroupText, Mode=OneWay}"
+                      Command="{x:Bind ToggleGroupCommand}"
+                      Padding="10,2"
+                      FontSize="12" />
+                </Grid>
+              </DataTemplate>
+            </GroupStyle.HeaderTemplate>
+          </GroupStyle>
+        </ListView.GroupStyle>
+
+        <ListView.ItemTemplate>
+          <DataTemplate x:DataType="vm:PackageRow">
+            <Grid MinHeight="46" Padding="6,3" ColumnSpacing="12" Opacity="{x:Bind RowOpacity}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+
+              <CheckBox
+                  Grid.Column="0"
+                  MinWidth="0"
+                  VerticalAlignment="Center"
+                  IsChecked="{x:Bind IsChecked, Mode=TwoWay}"
+                  IsEnabled="{x:Bind IsSelectable}" />
+
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                <TextBlock
+                    Text="{x:Bind Subtitle}"
+                    FontSize="11"
+                    TextTrimming="CharacterEllipsis"
+                    Foreground="{ThemeResource AppSubtleTextBrush}" />
+              </StackPanel>
+
+              <!-- 运行库角标（InfoBadge 只支持数字/图标，这里用等价视觉的文本徽标） -->
+              <Border
+                  Grid.Column="2"
+                  Padding="8,2"
+                  VerticalAlignment="Center"
+                  CornerRadius="9"
+                  Background="{ThemeResource AccentFillColorDefaultBrush}"
+                  Visibility="{x:Bind app:UiConverters.VisibleIf(ShowDependencyBadge)}">
+                <TextBlock
+                    Text="运行库"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+              </Border>
+
+              <TextBlock
+                  Grid.Column="3"
+                  MinWidth="84"
+                  VerticalAlignment="Center"
+                  HorizontalAlignment="Right"
+                  FontSize="12"
+                  TextAlignment="Right"
+                  Text="{x:Bind VersionText}"
+                  Foreground="{ThemeResource AppSubtleTextBrush}" />
+            </Grid>
+          </DataTemplate>
+        </ListView.ItemTemplate>
+      </ListView>
+
+      <!-- 空态（P1-2）：无结果 / 仅看已选无勾选 / 尚未扫描 -->
+      <StackPanel
+          VerticalAlignment="Center"
+          HorizontalAlignment="Center"
+          Spacing="8"
+          MaxWidth="460"
+          Visibility="{x:Bind app:UiConverters.VisibleIf(ViewModel.ShowEmptyState), Mode=OneWay}">
+        <FontIcon Glyph="&#xE721;" FontSize="28" Foreground="{ThemeResource AppSubtleTextBrush}" />
+        <TextBlock
+            Text="{x:Bind ViewModel.EmptyStateText, Mode=OneWay}"
+            TextWrapping="Wrap"
+            TextAlignment="Center"
+            Foreground="{ThemeResource AppSubtleTextBrush}" />
+      </StackPanel>
+
+      <!-- 缺 winget 引导页（P0-15：窗口内切换，不弹窗不退出） -->
+      <StackPanel
+          VerticalAlignment="Center"
+          HorizontalAlignment="Center"
+          Spacing="14"
+          MaxWidth="560"
+          Visibility="{x:Bind app:UiConverters.VisibleIf(ViewModel.ShowGuide), Mode=OneWay}">
+        <FontIcon Glyph="&#xE7BA;" FontSize="36" HorizontalAlignment="Center" />
+        <TextBlock Text="没有找到 winget" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
+        <TextBlock
+            Text="{x:Bind ViewModel.WingetErrorText, Mode=OneWay}"
+            TextWrapping="Wrap"
+            TextAlignment="Center"
+            Foreground="{ThemeResource AppSubtleTextBrush}" />
+        <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+          <Button
+              Content="去 Microsoft Store 安装 App Installer"
+              Style="{StaticResource AccentButtonStyle}"
+              Command="{x:Bind ViewModel.OpenAppInstallerCommand}" />
+          <Button Content="重新检测" Command="{x:Bind ViewModel.RecheckWingetCommand}" />
+        </StackPanel>
+        <TextBlock
+            Text="安装完成后点「重新检测」即可继续扫描，无需重启程序。"
+            FontSize="12"
+            TextAlignment="Center"
+            Foreground="{ThemeResource AppSubtleTextBrush}" />
+      </StackPanel>
+    </Grid>
+
+    <!-- ═════════════════════ 底栏 ═════════════════════ -->
+    <Border
+        Grid.Row="2"
+        Padding="20,10,20,14"
+        BorderThickness="0,1,0,0"
+        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+      <StackPanel Spacing="8">
+        <ProgressBar
+            Height="3"
+            IsIndeterminate="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
+            Visibility="{x:Bind app:UiConverters.VisibleIf(ViewModel.IsScanning), Mode=OneWay}" />
+
+        <Grid ColumnSpacing="20">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+            <TextBlock
+                Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                TextTrimming="CharacterEllipsis"
+                FontSize="12" />
+            <TextBlock
+                Text="{x:Bind ViewModel.ElapsedText, Mode=OneWay}"
+                FontSize="11"
+                Foreground="{ThemeResource AppSubtleTextBrush}"
+                Visibility="{x:Bind app:UiConverters.VisibleIfAny(ViewModel.ElapsedText), Mode=OneWay}" />
+          </StackPanel>
+
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <TextBlock
+                Text="{x:Bind ViewModel.SelectedCountText, Mode=OneWay}"
+                FontSize="12"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource AppSubtleTextBrush}"
+                Margin="0,0,6,0" />
+
+            <Border Background="{ThemeResource AppCardBrush}" CornerRadius="8" Padding="14,6" MinWidth="72">
+              <StackPanel Spacing="0">
+                <TextBlock Text="{x:Bind ViewModel.TotalText, Mode=OneWay}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock Text="总数" FontSize="11" HorizontalAlignment="Center" Foreground="{ThemeResource AppSubtleTextBrush}" />
+              </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource AppCardBrush}" CornerRadius="8" Padding="14,6" MinWidth="72">
+              <StackPanel Spacing="0">
+                <TextBlock Text="{x:Bind ViewModel.SoftwareText, Mode=OneWay}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock Text="软件" FontSize="11" HorizontalAlignment="Center" Foreground="{ThemeResource AppSubtleTextBrush}" />
+              </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource AppCardBrush}" CornerRadius="8" Padding="14,6" MinWidth="72">
+              <StackPanel Spacing="0">
+                <TextBlock Text="{x:Bind ViewModel.DependencyText, Mode=OneWay}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock Text="运行库" FontSize="11" HorizontalAlignment="Center" Foreground="{ThemeResource AppSubtleTextBrush}" />
+              </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource AppCardBrush}" CornerRadius="8" Padding="14,6" MinWidth="72">
+              <StackPanel Spacing="0">
+                <TextBlock Text="{x:Bind ViewModel.UnsupportedText, Mode=OneWay}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock Text="不支持" FontSize="11" HorizontalAlignment="Center" Foreground="{ThemeResource AppSubtleTextBrush}" />
+              </StackPanel>
+            </Border>
+
+            <TextBlock
+                Text="{x:Bind ViewModel.WingetVersionText, Mode=OneWay}"
+                FontSize="11"
+                VerticalAlignment="Center"
+                Foreground="{ThemeResource AppSubtleTextBrush}" />
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+    </Border>
   </Grid>
 </Window>

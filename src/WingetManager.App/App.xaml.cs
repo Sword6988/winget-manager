@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using Microsoft.UI.Xaml;
+using WingetManager.AppServices;
 using WingetManager.Infra;
 
 namespace WingetManager;
@@ -38,6 +39,9 @@ public partial class App : Application
         Log = new LogService();
         LogService.SetShared(Log);
         Log.Info("启动 {0} {1} · .NET {2}", DisplayName, Version, Environment.Version);
+
+        // 后台 Task（扫描/富化）回到 UI 线程的唯一入口，必须在建窗口前绑定
+        UiDispatch.Initialize(Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread());
 
         _window = new MainWindow();
         MainWindowInstance = _window;

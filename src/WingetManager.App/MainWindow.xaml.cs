@@ -1,18 +1,65 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
 using Microsoft.UI.Composition.SystemBackdrops;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Data;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.Graphics;
+using Windows.Storage.Pickers;
+using WingetManager.Infra;
+using WingetManager.Persistence;
+using WingetManager.ViewModels;
 
 namespace WingetManager;
 
-/// <summary>主窗口（T01 最小形态：仅验证 WinUI 3 + AOT 能启动并渲染）。</summary>
-public sealed partial class MainWindow : Window
+/// <summary>
+/// 主窗口：只做「渲染 + 拿路径 + 弹框」，业务编排全在 <see cref="MainViewModel"/>。
+///
+/// AOT 相关：
+/// <list type="bullet">
+/// <item>分组视图用代码创建 <see cref="CollectionViewSource"/>（XAML 里给它 <c>x:Name</c>
+///       需要进 ResourceDictionary，反而绕）；</item>
+/// <item>文件选择器必须用 <c>WindowNative</c> + <c>InitializeWithWindow</c> 传 hwnd
+///       （未打包应用没有隐式窗口上下文），这条是 CsWinRT 源生成链路，AOT 安全；</item>
+/// <item><see cref="ContentDialog"/> 在未打包场景必须显式给 <c>XamlRoot</c>，否则直接抛。</item>
+/// </list>
+/// </summary>
+public sealed partial class MainWindow : Window, IMainView
 {
+    private readonly CollectionViewSource _groupedSource = new() { IsSourceGrouped = true };
+    private readonly SettingsStore _settings;
+
+    /// <summary>创建主窗口并完成装配。</summary>
     public MainWindow()
     {
         InitializeComponent();
-        Title = "Winget 软件管家";
+
+        Title = App.DisplayName;
+        _settings = new SettingsStore(AppPaths.RegistryKeyPath, App.Log);
+
+        ViewModel = new MainViewModel(this, App.Log);
+
+        // 分组视图的数据源就是 VM 的 Groups；集合内部增删由 ObservableCollection 通知视图
+        _groupedSource.Source = ViewModel.Groups;
+
+        RestoreGroupSelection();
+        ApplyWindowBounds();
         TrySetMicaBackdrop();
+
+        RootGrid.Loaded += OnRootLoaded;
+        Closed += OnWindowClosed;
     }
+
+    /// <summary>编排中枢（x:Bind 的唯一数据根）。</summary>
+    public MainViewModel ViewModel { get; }
+
+    /// <summary>列表的分组视图（供 <c>ItemsSource="{x:Bind GroupedSource.View}"</c>）。</summary>
+    public CollectionViewSource GroupedSource => _groupedSource;
 
     /// <summary>Mica 背景（P1-6 深浅色跟随系统；不支持的系统静默跳过）。</summary>
     private void TrySetMicaBackdrop()
@@ -23,5 +70,245 @@ public sealed partial class MainWindow : Window
         }
 
         SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
+    }
+
+    private async void OnRootLoaded(object sender, RoutedEventArgs e)
+    {
+        RootGrid.Loaded -= OnRootLoaded;
+
+        // 首屏自动扫描（约 2 秒）
+        await ViewModel.InitialScanAsync();
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        SaveWindowBounds();
+
+        // 取消扫描与后台核查；缓存是逐条原子写的，未完成的那一条要么旧要么新，不会写坏
+        ViewModel.Dispose();
+    }
+
+    // ───────────────────────────── 窗口尺寸 / 位置（P0-18、P1-3） ─────────────────────────────
+
+    private void ApplyWindowBounds()
+    {
+        var bounds = _settings.GetWindowBounds();
+        var width = Math.Clamp(bounds.Width, 720, 6000);
+        var height = Math.Clamp(bounds.Height, 520, 4000);
+
+        var x = bounds.X;
+        var y = bounds.Y;
+        if (x < -10000 || y < -10000)
+        {
+            // 记录值明显来自已断开的显示器，回到默认位置，别把窗口开到看不到的地方
+            x = WindowBounds.Default.X;
+            y = WindowBounds.Default.Y;
+        }
+
+        AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
+
+        if (bounds.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.Maximize();
+        }
+    }
+
+    private void SaveWindowBounds()
+    {
+        try
+        {
+            var stored = _settings.GetWindowBounds();
+            var presenter = AppWindow.Presenter as OverlappedPresenter;
+            if (presenter?.State == OverlappedPresenterState.Maximized)
+            {
+                // 最大化时不要把「最大化尺寸」当成下次的还原尺寸存下去
+                _settings.SetWindowBounds(stored with { IsMaximized = true });
+                return;
+            }
+
+            _settings.SetWindowBounds(new WindowBounds(
+                AppWindow.Position.X,
+                AppWindow.Position.Y,
+                AppWindow.Size.Width,
+                AppWindow.Size.Height,
+                false));
+        }
+        catch (Exception ex)
+        {
+            App.Log.Warn("保存窗口尺寸失败：{0}", ex.Message);
+        }
+    }
+
+    // ───────────────────────────── 分组胶囊（P0-9） ─────────────────────────────
+
+    private void RestoreGroupSelection()
+    {
+        var target = ViewModel.ActiveGroup;
+        foreach (var item in GroupSelector.Items)
+        {
+            if (item is SelectorBarItem candidate && string.Equals(candidate.Text, target, StringComparison.Ordinal))
+            {
+                GroupSelector.SelectedItem = candidate;
+                return;
+            }
+        }
+
+        if (GroupSelector.Items.Count > 0)
+        {
+            GroupSelector.SelectedItem = GroupSelector.Items[0];
+        }
+    }
+
+    private void OnGroupSelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        var text = sender.SelectedItem?.Text;
+        if (!string.IsNullOrEmpty(text))
+        {
+            ViewModel.ActiveGroup = text;
+        }
+    }
+
+    // ───────────────────────────── 快捷键（P1-4） ─────────────────────────────
+
+    private void OnFocusSearchAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        SearchBox.Focus(FocusState.Programmatic);
+        SearchBox.SelectAll();
+    }
+
+    private void OnSelectAllAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        // 搜索框里 Ctrl+A 应该是「选中输入的文字」，不能抢
+        if (IsTextInputFocused())
+        {
+            return;
+        }
+
+        args.Handled = true;
+        ViewModel.SelectAllCommand.Execute(null);
+    }
+
+    private void OnExportAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (IsTextInputFocused() || !ViewModel.CanExport)
+        {
+            return;
+        }
+
+        args.Handled = true;
+        ViewModel.ExportCommand.Execute(null);
+    }
+
+    private void OnRescanAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        ViewModel.RescanOrCancelCommand.Execute(null);
+    }
+
+    private void OnEscapeAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (ViewModel.IsScanning)
+        {
+            args.Handled = true;
+            ViewModel.CancelScan();
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(ViewModel.SearchText))
+        {
+            args.Handled = true;
+            ViewModel.SearchText = string.Empty;
+        }
+    }
+
+    private bool IsTextInputFocused()
+    {
+        return FocusManager.GetFocusedElement(RootGrid.XamlRoot) is TextBox;
+    }
+
+    // ───────────────────────────── IMainView：导出取路径 + 弹框 ─────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<string?> PickExportPathAsync(string suggestedPath)
+    {
+        var suggestedName = Path.GetFileNameWithoutExtension(suggestedPath);
+        if (string.IsNullOrWhiteSpace(suggestedName))
+        {
+            suggestedName = "apps";
+        }
+
+        try
+        {
+            var picker = new FileSavePicker
+            {
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                SuggestedFileName = suggestedName,
+                DefaultFileExtension = ".json",
+            };
+            picker.FileTypeChoices.Add("winget 导入清单", new List<string> { ".json" });
+
+            // 未打包应用必须显式把窗口句柄交给 picker，否则 PickSaveFileAsync 直接抛
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+            var file = await picker.PickSaveFileAsync();
+            return file?.Path;
+        }
+        catch (Exception ex)
+        {
+            App.Log.Error("打开「另存为」失败：{0}", ex);
+
+            // 系统策略禁用文件选择器时不让用户卡死：确认后用默认路径直接导出
+            var confirmed = await ConfirmAsync(
+                "无法打开文件选择器",
+                "系统没有允许打开「另存为」窗口。是否直接导出到默认位置？\n\n" + suggestedPath,
+                "导出到默认位置",
+                "取消").ConfigureAwait(true);
+
+            return confirmed ? suggestedPath : null;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task ShowMessageAsync(string title, string message)
+    {
+        return ShowDialogAsync(new ContentDialog
+        {
+            Title = title,
+            Content = message,
+            CloseButtonText = "知道了",
+            DefaultButton = ContentDialogButton.Close,
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ConfirmAsync(string title, string message, string primaryButtonText, string closeButtonText)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = message,
+            PrimaryButtonText = primaryButtonText,
+            CloseButtonText = closeButtonText,
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        return await ShowDialogAsync(dialog).ConfigureAwait(true) == ContentDialogResult.Primary;
+    }
+
+    private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog)
+    {
+        // 未打包 WinUI 3 必须显式给 XamlRoot，否则 ShowAsync 抛「This element is not associated with a XamlRoot」
+        dialog.XamlRoot = RootGrid.XamlRoot;
+        try
+        {
+            return await dialog.ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log.Error("弹窗失败：{0}", ex);
+            return ContentDialogResult.None;
+        }
     }
 }
