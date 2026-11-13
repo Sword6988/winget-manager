@@ -1,0 +1,5 @@
+;!@Install@!UTF-8!
+Title="Winget 软件管家 3.0.0"
+BeginPrompt="将安装 Winget 软件管家 到 %LOCALAPPDATA%\Programs\WingetManager 并启动，是否继续？"
+RunProgram="install.cmd"
+;!@InstallEnd@!
