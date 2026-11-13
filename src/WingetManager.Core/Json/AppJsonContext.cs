@@ -26,6 +26,7 @@ namespace WingetManager.Json;
     ReadCommentHandling = JsonCommentHandling.Skip)]
 [JsonSerializable(typeof(MetadataCacheFile))]
 [JsonSerializable(typeof(MetadataCacheEntry))]
+[JsonSerializable(typeof(CatalogCacheFile))]
 [JsonSerializable(typeof(WingetImportManifest))]
 [JsonSerializable(typeof(WingetImportSource))]
 [JsonSerializable(typeof(WingetImportPackage))]

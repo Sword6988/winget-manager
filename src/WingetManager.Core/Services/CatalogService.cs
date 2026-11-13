@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using WingetManager.Infra;
 using WingetManager.Models;
+using WingetManager.Persistence;
 
 namespace WingetManager.Services;
 
@@ -39,6 +40,7 @@ public sealed class CatalogService
     private readonly AppConfig _config;
     private readonly WingetRepository _repository;
     private readonly RuntimeCache? _cache;
+    private readonly CatalogSnapshotStore? _snapshotStore;
     private readonly LogService _log;
     private readonly object _gate = new();
 
@@ -52,12 +54,17 @@ public sealed class CatalogService
     /// <param name="repository">winget 仓储层。</param>
     /// <param name="cache">运行库判定缓存；null 表示关闭元数据合并（只看关键词）。</param>
     /// <param name="log">日志服务；null 用共享实例。</param>
+    /// <param name="snapshotStore">
+    /// 快照落盘缓存；null 表示不落盘（等价旧行为）。传入时每次扫描成功后把快照原子写入
+    /// <c>catalog-cache.json</c>，供应用冷启动「秒开」（stale-while-revalidate）。
+    /// </param>
     public CatalogService(AppConfig config, WingetRepository repository, RuntimeCache? cache = null,
-                          LogService? log = null)
+                          LogService? log = null, CatalogSnapshotStore? snapshotStore = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _cache = cache;
+        _snapshotStore = snapshotStore;
         _log = log ?? LogService.Shared;
     }
 
@@ -105,6 +112,9 @@ public sealed class CatalogService
             _snapshot = snapshot;
             _snapshotAtTicks = DateTime.UtcNow.Ticks;
         }
+
+        // 扫描成功即落盘，供下次冷启动秒开；写失败由 store 内部记 WARN，不影响本次结果
+        _snapshotStore?.Save(snapshot);
 
         return snapshot;
     }

@@ -262,6 +262,23 @@
         BorderThickness="0,1,0,0"
         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
       <StackPanel Spacing="8">
+        <!-- 冷启动秒开的轻提示：已渲染落盘快照、正在后台静默刷新（不打扰列表交互） -->
+        <StackPanel
+            Orientation="Horizontal"
+            Spacing="8"
+            HorizontalAlignment="Left"
+            Visibility="{x:Bind app:UiConverters.VisibleIf(ViewModel.IsBackgroundRefreshing), Mode=OneWay}">
+          <ProgressRing
+              Width="14"
+              Height="14"
+              IsActive="{x:Bind ViewModel.IsBackgroundRefreshing, Mode=OneWay}" />
+          <TextBlock
+              Text="正在后台刷新…"
+              FontSize="11"
+              VerticalAlignment="Center"
+              Foreground="{ThemeResource AppSubtleTextBrush}" />
+        </StackPanel>
+
         <ProgressBar
             Height="3"
             IsIndeterminate="{x:Bind ViewModel.IsScanning, Mode=OneWay}"

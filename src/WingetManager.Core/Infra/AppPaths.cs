@@ -30,6 +30,9 @@ public static class AppPaths
     /// <summary>%LOCALAPPDATA%\WingetManager\metadata-cache.json</summary>
     public static string MetadataCacheFile { get; } = Path.Combine(DataDirectory, "metadata-cache.json");
 
+    /// <summary>%LOCALAPPDATA%\WingetManager\catalog-cache.json（冷启动秒开用的快照缓存）</summary>
+    public static string CatalogCacheFile { get; } = Path.Combine(DataDirectory, "catalog-cache.json");
+
     /// <summary>程序所在目录（诊断信息用；AOT 下与 exe 同目录）。</summary>
     public static string InstallDirectory { get; } =
         AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

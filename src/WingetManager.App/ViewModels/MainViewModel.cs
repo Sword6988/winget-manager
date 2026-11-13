@@ -47,6 +47,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IMainView _view;
     private readonly LogService _log;
     private readonly RuntimeCache _cache;
+    private readonly CatalogSnapshotStore _snapshotStore;
     private readonly SelectionStore _selectionStore;
     private readonly SettingsStore _settings;
     private readonly ExportService _export;
@@ -78,13 +79,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _log = log ?? LogService.Shared;
 
         _cache = new RuntimeCache(AppPaths.MetadataCacheFile, _log);
+        _snapshotStore = new CatalogSnapshotStore(AppPaths.CatalogCacheFile, _log);
         _selectionStore = new SelectionStore(AppPaths.SelectionFile, _log);
         _settings = new SettingsStore(AppPaths.RegistryKeyPath, _log);
         _export = new ExportService(_log);
 
         _config = LoadConfigSafe();
         _repository = new WingetRepository(_config, _log);
-        _catalog = new CatalogService(_config, _repository, _cache, _log);
+        _catalog = new CatalogService(_config, _repository, _cache, _log, _snapshotStore);
         _enricher = CreateEnricher();
 
         ShowGuide = !_config.HasWinget;
@@ -97,6 +99,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _initialized = true;
         RebuildGroups();
         UpdateCounts();
+
+        // 冷启动秒开：有落盘快照就先渲染（毫秒级），InitialScanAsync 里再后台静默刷新
+        TryRestoreSnapshotFromDisk();
     }
 
     /// <summary>
@@ -123,6 +128,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>是否正在扫描（决定按钮文案与进度条动画）。</summary>
     [ObservableProperty]
     private bool _isScanning;
+
+    /// <summary>
+    /// 是否在后台静默刷新（冷启动已渲染落盘快照时的补扫）。
+    /// 与 <see cref="IsScanning"/> 分开：刷新期间不打扰列表交互，只在进度条区域给个轻提示。
+    /// </summary>
+    [ObservableProperty]
+    private bool _isBackgroundRefreshing;
 
     /// <summary>底部状态文字。</summary>
     [ObservableProperty]
@@ -202,6 +214,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// 首屏扫描（窗口 Loaded 时调用一次）。缺 winget 时只切引导页，不抛异常、不退出。
+    ///
+    /// 冷启动秒开：构造函数里已经渲染了落盘快照的话，这里直接发起后台静默刷新
+    /// （force=true 全量重扫，完成后用新快照替换列表并回写 catalog-cache.json）；
+    /// 无缓存（首次运行）仍走原有完整扫描路径。
     /// </summary>
     /// <returns>任务。</returns>
     public async Task InitialScanAsync()
@@ -213,15 +229,37 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (_snapshot is not null)
+        {
+            IsBackgroundRefreshing = true;
+            try
+            {
+                await ScanAsync(force: true, silentRefresh: true).ConfigureAwait(true);
+            }
+            finally
+            {
+                IsBackgroundRefreshing = false;
+            }
+
+            return;
+        }
+
         await ScanAsync(force: true).ConfigureAwait(true);
     }
 
     /// <summary>
     /// 扫描（force=true 忽略 TTL 缓存）。取消与失败都只改状态文字，不弹窗、不崩。
+    ///
+    /// 防重入：后台静默刷新期间用户点「重新扫描」直接 return（按钮此时是「取消扫描」，
+    /// 再点是取消），<see cref="WingetRepository"/> 内部的 SemaphoreSlim 也会拦住并发 winget。
     /// </summary>
     /// <param name="force">是否强制重新扫描。</param>
+    /// <param name="silentRefresh">
+    /// true = 后台静默刷新：不覆盖状态文字里「已加载上次扫描结果」的提示，
+    /// 失败/取消时保留已渲染的旧快照，不切引导页。
+    /// </param>
     /// <returns>任务。</returns>
-    public async Task ScanAsync(bool force)
+    public async Task ScanAsync(bool force, bool silentRefresh = false)
     {
         if (_disposed || IsScanning)
         {
@@ -246,7 +284,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ScanButtonText));
         ShowGuide = false;
         ElapsedText = "已用 0.0s · 点「取消扫描」可中断";
-        StatusText = "正在扫描本机软件…";
+        if (!silentRefresh)
+        {
+            // 静默刷新时保留「已加载上次扫描结果（…），正在后台刷新…」的提示
+            StatusText = "正在扫描本机软件…";
+        }
+
         _scanStartedAt = DateTime.UtcNow;
         StartElapsedTimer();
 
@@ -263,24 +306,35 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
-            StatusText = "已取消扫描。";
+            StatusText = silentRefresh
+                ? "已取消后台刷新，当前显示的是上次扫描结果。"
+                : "已取消扫描。";
             _log.Info("用户取消了扫描");
         }
         catch (WingetNotFoundException ex)
         {
-            ShowGuide = true;
-            WingetErrorText = ex.UserMessage;
-            StatusText = ex.UserMessage;
-            _log.Warn("扫描失败（未找到 winget）：{0}", ex.Detail);
+            if (silentRefresh)
+            {
+                // 已经渲染了旧快照，别把用户切到引导页；列表留着，文字说明即可
+                StatusText = "后台刷新失败：未找到 winget，已显示上次扫描结果。";
+                _log.Warn("后台刷新失败（未找到 winget）：{0}", ex.Detail);
+            }
+            else
+            {
+                ShowGuide = true;
+                WingetErrorText = ex.UserMessage;
+                StatusText = ex.UserMessage;
+                _log.Warn("扫描失败（未找到 winget）：{0}", ex.Detail);
+            }
         }
         catch (AppException ex)
         {
-            StatusText = ex.UserMessage;
+            StatusText = silentRefresh ? "后台刷新失败，已显示上次扫描结果。" : ex.UserMessage;
             _log.Error("扫描失败：{0}", ex.Detail);
         }
         catch (Exception ex)
         {
-            StatusText = "扫描失败，请查看日志。";
+            StatusText = silentRefresh ? "后台刷新失败，已显示上次扫描结果。" : "扫描失败，请查看日志。";
             _log.Error("扫描异常：{0}", ex);
         }
         finally
@@ -303,7 +357,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// 把快照应用到界面：合并勾选 → 重建分组 → 更新统计 → 启动后台元数据核查。
     /// </summary>
     /// <param name="snapshot">扫描结果。</param>
-    public void ApplySnapshot(CatalogSnapshot snapshot)
+    /// <param name="startEnrichment">
+    /// 是否启动后台元数据核查；冷启动渲染落盘快照时传 false——紧随其后的后台刷新
+    /// 会用新快照重新走一遍完整流程，先起富化只会被 <see cref="ScanAsync"/> 立刻取消。
+    /// </param>
+    public void ApplySnapshot(CatalogSnapshot snapshot, bool startEnrichment = true)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -337,7 +395,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _packages.Count(p => p.Reinstallable),
             duration);
 
-        StartEnrichment(snapshot);
+        if (startEnrichment)
+        {
+            StartEnrichment(snapshot);
+        }
     }
 
     /// <summary>
@@ -519,6 +580,50 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// 冷启动秒开：读落盘快照（catalog-cache.json）并直接渲染。
+    ///
+    /// 只在「有 winget、有有效缓存」时生效；损坏/缺失由 <see cref="CatalogSnapshotStore"/>
+    /// 返回 null，静默回退到原有完整扫描路径。渲染时跳过元数据核查（后台刷新马上会
+    /// 全量重扫并重新起富化）。统计与「上次扫描时间」一律按快照里的 GeneratedAt 显示。
+    /// </summary>
+    private void TryRestoreSnapshotFromDisk()
+    {
+        if (ShowGuide)
+        {
+            return;
+        }
+
+        var cached = _snapshotStore.Load();
+        if (cached is null)
+        {
+            return;
+        }
+
+        ApplySnapshot(cached, startEnrichment: false);
+        StatusText = string.Format(
+            CultureInfo.InvariantCulture,
+            "已加载上次扫描结果（{0}），正在后台刷新…",
+            FormatGeneratedAtDisplay(cached.GeneratedAt));
+    }
+
+    /// <summary>
+    /// 把快照的 GeneratedAt（<c>2026-11-03T14:00:00+0800</c>）折成 <c>2026-11-03 14:00</c>。
+    /// 解析不了就原样返回——提示文案永远不该让启动失败。
+    /// </summary>
+    /// <param name="generatedAt">快照生成时间原文。</param>
+    /// <returns>展示用短文本。</returns>
+    private static string FormatGeneratedAtDisplay(string generatedAt)
+    {
+        if (generatedAt.Length >= 16 && generatedAt[10] == 'T'
+            && char.IsDigit(generatedAt[0]) && char.IsDigit(generatedAt[11]))
+        {
+            return generatedAt[..10] + " " + generatedAt[11..16];
+        }
+
+        return generatedAt;
+    }
+
     /// <summary>从 selection.json 恢复勾选（损坏文件由 SelectionStore 兜底成空集）。</summary>
     private void RestoreSelection()
     {
@@ -672,7 +777,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _config = LoadConfigSafe();
         _repository = new WingetRepository(_config, _log);
-        _catalog = new CatalogService(_config, _repository, _cache, _log);
+        _catalog = new CatalogService(_config, _repository, _cache, _log, _snapshotStore);
         _enricher.Changes -= OnMetadataChanges;
         _enricher.Completed -= OnEnrichmentCompleted;
         _enricher.Cancel();

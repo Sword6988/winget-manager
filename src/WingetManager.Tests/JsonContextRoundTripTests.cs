@@ -158,11 +158,53 @@ public sealed class JsonContextRoundTripTests
     }
 
     [Fact]
+    public void CatalogCacheFile_RoundTripsThroughSourceGenerator()
+    {
+        // 冷启动秒开的落盘缓存：包一层 {schema, snapshot}，读写必须都走源生成（AOT）
+        var payload = new CatalogCacheFile
+        {
+            Snapshot = new CatalogSnapshot
+            {
+                GeneratedAt = "2026-11-03T14:00:00+0800",
+                DurationMs = 10800,
+                WingetVersion = "1.10.0",
+                Machine = new MachineInfo { Hostname = "PC", Os = "Windows", Arch = "AMD64" },
+                Counts = new CatalogCounts { Total = 1, Reinstallable = 1 },
+                Packages = new List<Package>
+                {
+                    new()
+                    {
+                        PackageIdentifier = "Google.Chrome",
+                        Name = "Google Chrome",
+                        Version = "1.0",
+                        Source = "winget",
+                        Reinstallable = true,
+                    },
+                },
+            },
+        };
+
+        var json = JsonOutput.Serialize(payload, AppJsonContext.Compat.CatalogCacheFile);
+        Assert.StartsWith("{\n  \"schema\": 1,", json, StringComparison.Ordinal);
+        Assert.Contains("\"snapshot\": {", json, StringComparison.Ordinal);
+
+        var back = JsonSerializer.Deserialize(json, AppJsonContext.Default.CatalogCacheFile);
+        Assert.NotNull(back);
+        Assert.Equal(1, back!.Schema);
+        Assert.NotNull(back.Snapshot);
+        Assert.Equal("2026-11-03T14:00:00+0800", back.Snapshot.GeneratedAt);
+        var package = Assert.Single(back.Snapshot.Packages);
+        Assert.Equal("Google.Chrome", package.PackageIdentifier);
+        Assert.True(package.Reinstallable);
+    }
+
+    [Fact]
     public void Context_DoesNotUseReflectionFallback()
     {
         // 未注册的类型拿不到 JsonTypeInfo（源生成模式下会返回 null / 抛异常），
         // 这里用「已注册类型必须有 typeInfo」反证注册表是完整的。
         Assert.NotNull(AppJsonContext.Default.MetadataCacheFile);
+        Assert.NotNull(AppJsonContext.Default.CatalogCacheFile);
         Assert.NotNull(AppJsonContext.Default.WingetImportManifest);
         Assert.NotNull(AppJsonContext.Default.CatalogSnapshot);
         Assert.NotNull(AppJsonContext.Default.DictionaryStringBoolean);
