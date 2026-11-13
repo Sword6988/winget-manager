@@ -15,6 +15,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <UseWinUI>true</UseWinUI>
     <Platforms>x64;ARM64</Platforms>
+
+    <!-- exe 文件图标（资源管理器 / 任务栏快捷方式读取 PE 资源里的这个 ico） -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
 
@@ -46,6 +49,13 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.251107005" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4948" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 窗口图标（AppWindow.SetIcon 按文件路径加载）与界面图标素材，
+         ico 必须随输出复制，publish 目录里也要有（未打包应用用相对 exe 的路径加载） -->
+    <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\app-512.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

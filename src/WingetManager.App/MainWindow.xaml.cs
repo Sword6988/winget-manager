@@ -52,6 +52,7 @@ public sealed partial class MainWindow : Window, IMainView
 
         RestoreGroupSelection();
         ApplyWindowBounds();
+        TrySetWindowIcon();
         TrySetMicaBackdrop();
 
         RootGrid.Loaded += OnRootLoaded;
@@ -60,6 +61,33 @@ public sealed partial class MainWindow : Window, IMainView
 
     /// <summary>编排中枢（x:Bind 的唯一数据根）。</summary>
     public MainViewModel ViewModel { get; }
+
+    // ───────────────────────────── 窗口图标（标题栏 / 任务栏 / Alt-Tab） ─────────────────────────────
+
+    /// <summary>
+    /// 设置窗口图标（标题栏、任务栏、Alt-Tab 三处共用）。
+    /// 未打包应用不会从 MSIX 清单拿到图标，必须用 <see cref="AppWindow"/>（Microsoft.UI.Windowing）
+    /// 的 SetIcon 按文件路径加载；ico 已配置随输出复制，故取 exe 同目录下的 Assets\app.ico。
+    /// 加载失败不影响启动，只记日志兜底（此时标题栏为默认图标）。
+    /// </summary>
+    private void TrySetWindowIcon()
+    {
+        try
+        {
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+            if (!File.Exists(iconPath))
+            {
+                App.Log.Warn("窗口图标缺失，跳过设置：{0}", iconPath);
+                return;
+            }
+
+            AppWindow.SetIcon(iconPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log.Warn("设置窗口图标失败：{0}", ex.Message);
+        }
+    }
 
     /// <summary>Mica 背景（P1-6 深浅色跟随系统；不支持的系统静默跳过）。</summary>
     private void TrySetMicaBackdrop()
