@@ -634,33 +634,54 @@ graph TD
 # 1. 日常开发（不需要 AOT）
 dotnet build WingetManager.sln -c Release
 
-# 2. 出安装版单文件包（AOT publish + SFX 打包，约 1.5 分钟）
+# 2. 出安装版单文件包（AOT publish + SFX 打包，约 2 分钟）
 bash packaging/build-dist.sh
 
-# 3. 出便携版（不落盘）单文件包
+# 3. 只出便携版（程序不落盘）
 bash packaging/build-dist.sh --portable
 
-# 4. 两个都出
-bash packaging/build-dist.sh both
+# 4. 只出绿色版（数据也跟着文件夹走）
+bash packaging/build-dist.sh --green
 
-# 5. 只重打包（已 publish 过，改完 install.cmd / launch-portable.cmd / sfx-config*.txt 时用）
-bash packaging/build-dist.sh both --skip-publish
+# 5. 组合：安装 + 便携 / 三种全出
+bash packaging/build-dist.sh both
+bash packaging/build-dist.sh all
+
+# 6. 只重打包（已 publish 过；改完 install.cmd / launch-portable.cmd /
+#    sfx-config*.txt / PORTABLE-README.txt 时用）
+bash packaging/build-dist.sh all --skip-publish
 ```
 
-两个产物共用同一份载荷（72 MB，已剔除 pdb），只差引导脚本与 SFX 配置：
+三种产物共用同一份载荷（72 MB / 276 文件，已剔除 pdb），差别在引导脚本与包装方式：
 
-| 产物 | 引导脚本 | 行为 |
-|---|---|---|
-| `dist/…-win-x64-sfx.exe`（安装版） | `install.cmd` | **双击即用，无确认框**：解压到临时目录 → 比对 `version.txt` → 版本一致直接启动（毫秒级），不一致则 `taskkill` + `robocopy /e /purge` 到 `%LOCALAPPDATA%\Programs\WingetManager` → 启动 → 清临时目录；失败（`errorlevel >= 8`）不启动、改为打开日志 |
-| `dist/…-win-x64-portable.exe`（便携版） | `launch-portable.cmd` | **不落盘**：解压到 `%TEMP%\7zSxxxx` 后**直接在临时目录里运行**，`start /wait` 等应用退出，7zSD 随后删除整个解压目录；程序文件零残留，代价是每次启动多 ~3 秒解压 |
+| 产物 | 形态 | 行为 | 数据位置 |
+|---|---|---|---|
+| `…-win-x64-sfx.exe`（安装版） | 单文件 | **双击即用，无确认框**：解压 → 比对 `version.txt` → 一致直接启动（毫秒级），不一致则 `taskkill` + `robocopy /e /purge` 到 `%LOCALAPPDATA%\Programs\WingetManager` → 启动 → 清临时目录；失败（`errorlevel >= 8`）不启动、改为打开日志 | `%LOCALAPPDATA%\WingetManager` + 注册表 |
+| `…-win-x64-portable.exe`（便携版） | 单文件 | **程序文件不落盘**：解压到 `%TEMP%\7zSxxxx` 直接在其中运行，`start /wait` 等应用退出，7zSD 随即删除整个解压目录；代价是每次启动多 ~3 秒解压 | `%LOCALAPPDATA%\WingetManager` + 注册表 |
+| `…-win-x64-green.zip`（绿色版） | 文件夹 | **完全绿色**：解压一次得到普通文件夹，双击 `WingetManager.exe` 直接跑（零解压开销）；整个文件夹拷走即带走全部状态，删掉即零残留 | `<文件夹>\data`（含 `settings.json`），**不碰注册表、不碰 `%LOCALAPPDATA%`** |
 
-便携版的两个关键点（写在 `launch-portable.cmd` 注释里）：
+便携版（`-portable.exe`）的两个关键点，写在 `launch-portable.cmd` 注释里：
 
 1. 必须 `cd /d "%TEMP%"` 先离开解压目录，否则该目录仍是进程 cwd，7zSD 删不掉（安装版那批空 `%TEMP%\7zSxxxx` 壳子就是这么来的）；
 2. 必须 `start "" /wait`，否则 7zSD 认为 `RunProgram` 已结束、会在应用运行中删掉载荷。
 
-两个版本都**不把用户数据外移**：`selection.json` / `metadata-cache.json` / `catalog-cache.json` / `logs` 始终在
-`%LOCALAPPDATA%\WingetManager`（勾选状态与秒开快照因此跨版本、跨安装/便携共享）。
+##### 便携模式如何判定（`AppPaths.ProbePortableDataDirectory`）
+按优先级：环境变量 `WINGETMGR_DATA_DIR` → exe 同目录存在 `portable.tag` → 安装版。
+标记文件存在时数据根切到 `<exe 目录>\data`，并做一次「建目录 + 写探测文件」的可写性检查；
+只读介质（光盘、写保护 U 盘）上会回退安装版，而不是反复崩在启动阶段。
+
+便携模式下 `SettingsStore.CreateDefault()` 返回**文件后端**（`data\settings.json`，扁平键值对），
+安装版仍是注册表后端 —— 绿色版若写注册表，「删掉文件夹就干净」就不成立。两条后端共用同一套
+`GetWindowBounds` / `GetLastCategory` 等公开 API，只有底层读写分派不同。
+
+**为什么绿色版只能是文件夹而不是单文件 exe**：`7zSD.sfx` 只向 `RunProgram` 暴露 `%%T`（解压目录），
+不暴露归档自身路径，解压出来的 exe 无从知道「我原本躺在哪个文件夹」，数据根就没有落点。
+（`7zSD.sfx` 二进制里的宏字符串只有 `%%T\`，已实测确认。）
+
+绿色版打包细节：`STAGE_DIR` 的目录名本身就是 zip 顶层文件夹名（`WingetManager-<版本>-green`），
+publish 直接落在那里，打 zip 时不再复制 72 MB 载荷；`portable.tag` 与 `PORTABLE-README.txt`
+只在打 zip 期间存在，打完后 `rm -f`，并在 SFX 打包前再清一次 —— 安装版/便携版的载荷里
+一旦混进 `portable.tag`，它们会被误判成绿色模式（数据写进程序目录）。
 
 载荷里不含 `WingetManager.pdb`（AOT 调试符号 58 MB，占原载荷 45%），
 `install.cmd` 的 `/xf *.pdb` + 显式 `del` 会把旧安装里的 pdb 一并清掉。

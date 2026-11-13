@@ -38,7 +38,10 @@ public sealed partial class MainWindow : Window, IMainView
         InitializeComponent();
 
         Title = App.DisplayName;
-        _settings = new SettingsStore(AppPaths.RegistryKeyPath, App.Log);
+
+        // 便携（绿色）模式必须零注册表残留：设置改存 data\settings.json，
+        // 否则「删掉文件夹就干净」不成立。安装版仍走注册表，与 Python 版互读。
+        _settings = SettingsStore.CreateDefault(App.Log);
 
         ViewModel = new MainViewModel(this, App.Log);
 

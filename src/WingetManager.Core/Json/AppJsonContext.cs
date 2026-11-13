@@ -38,6 +38,8 @@ namespace WingetManager.Json;
 [JsonSerializable(typeof(List<Package>))]
 [JsonSerializable(typeof(Dictionary<string, bool>))]
 [JsonSerializable(typeof(Dictionary<string, MetadataCacheEntry>))]
+/* 便携模式的 settings.json：扁平键值对（键名含 "/" 也用扁平结构，省一层模型） */
+[JsonSerializable(typeof(Dictionary<string, string>))]
 public partial class AppJsonContext : JsonSerializerContext
 {
     /// <summary>

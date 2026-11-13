@@ -81,7 +81,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _cache = new RuntimeCache(AppPaths.MetadataCacheFile, _log);
         _snapshotStore = new CatalogSnapshotStore(AppPaths.CatalogCacheFile, _log);
         _selectionStore = new SelectionStore(AppPaths.SelectionFile, _log);
-        _settings = new SettingsStore(AppPaths.RegistryKeyPath, _log);
+        _settings = SettingsStore.CreateDefault(_log);
         _export = new ExportService(_log);
 
         _config = LoadConfigSafe();
