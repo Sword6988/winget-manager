@@ -43,20 +43,21 @@ public static class AtomicFile
     }
 
     /// <summary>
-    /// 原子写入 JSON（UTF-8 无 BOM、两空格缩进、结尾换行），
+    /// 原子写入 JSON（UTF-8 无 BOM、两空格缩进、<b>LF</b> 换行、结尾换行），
     /// 序列化必须走 System.Text.Json 源生成的 <see cref="JsonTypeInfo{T}"/>（AOT 要求）。
+    ///
+    /// 换行固定成 LF：Python 版 <c>json.dumps</c> 写的就是 LF，.NET 的缩进 writer 在 Windows
+    /// 上默认给 CRLF——不归一化会导致两个版本写出的文件字节不一致（虽然都能读）。
     /// </summary>
     /// <typeparam name="T">DTO 类型（必须在 AppJsonContext 中注册）。</typeparam>
     /// <param name="path">目标文件路径。</param>
     /// <param name="payload">要序列化的对象。</param>
-    /// <param name="typeInfo">源生成的类型元数据，例如 <c>AppJsonContext.Default.WingetImportManifest</c>。</param>
+    /// <param name="typeInfo">源生成的类型元数据，例如 <c>AppJsonContext.Compat.WingetImportManifest</c>。</param>
     public static void WriteJson<T>(string path, T payload, JsonTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
 
-        // WriteIndented 在 AppJsonContext 上统一声明为 true（源生成不支持运行时 options 注入）
-        var json = JsonSerializer.Serialize(payload, typeInfo);
-        WriteText(path, json + "\n");
+        WriteText(path, Json.JsonOutput.Serialize(payload, typeInfo) + "\n");
     }
 
     /// <summary>原子写原始字节：临时文件 + fsync + 替换。</summary>

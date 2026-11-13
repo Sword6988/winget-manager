@@ -23,7 +23,7 @@ namespace WingetManager.Services;
 /// <item>撞上 winget 进程级全局互斥会自动退避重试（最多 2 次 × 0.4s，计入同一总超时预算）。</item>
 /// </list>
 /// </summary>
-public sealed class WingetRepository
+public class WingetRepository
 {
     /// <summary>轮询间隔：太小空转烧 CPU，太大取消手感发钝；0.2s 下用户最多等半拍。</summary>
     public const int PollIntervalMilliseconds = 200;
@@ -78,8 +78,8 @@ public sealed class WingetRepository
     /// <exception cref="WingetNotFoundException">没有可用的 winget.exe。</exception>
     /// <exception cref="WingetCommandFailedException">超时。</exception>
     /// <exception cref="ScanCancelledException">用户取消。</exception>
-    public async Task<CommandResult> RunAsync(IReadOnlyList<string> args, int? timeoutSeconds = null,
-                                              CancellationToken cancellationToken = default)
+    public virtual async Task<CommandResult> RunAsync(IReadOnlyList<string> args, int? timeoutSeconds = null,
+                                                      CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(args);
 
@@ -288,7 +288,7 @@ public sealed class WingetRepository
     /// </summary>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>形如 <c>1.30.100</c> 的版本串（去掉前导 v），或 <c>unknown</c>。</returns>
-    public async Task<string> GetVersionAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<string> GetVersionAsync(CancellationToken cancellationToken = default)
     {
         var result = await RunAsync(new[] { "--version" }, 30, cancellationToken).ConfigureAwait(false);
         var version = NormalizeVersionLine(result.Combined());
@@ -334,7 +334,7 @@ public sealed class WingetRepository
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>命令结果（stdout 是待解析的表格）。</returns>
     /// <exception cref="WingetCommandFailedException">命令失败且 stdout 一个字都没有。</exception>
-    public async Task<CommandResult> ListInstalledAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<CommandResult> ListInstalledAsync(CancellationToken cancellationToken = default)
     {
         var result = await RunAsync(
             new[] { "list", "--accept-source-agreements", "--disable-interactivity" },
@@ -372,7 +372,7 @@ public sealed class WingetRepository
     /// <param name="packageId">包 ID。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>命令结果。</returns>
-    public Task<CommandResult> ShowMetadataAsync(string packageId, CancellationToken cancellationToken = default)
+    public virtual Task<CommandResult> ShowMetadataAsync(string packageId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(packageId);
 

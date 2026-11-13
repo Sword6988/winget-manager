@@ -118,7 +118,7 @@ public static class SelectionFile
             }
         }
 
-        AtomicFile.WriteJson(path, payload, Json.AppJsonContext.Default.DictionaryStringBoolean);
+        AtomicFile.WriteJson(path, payload, Json.AppJsonContext.Compat.DictionaryStringBoolean);
     }
 
     /// <summary>把 JSON 值宽松地折成 bool（"1"/"true"/"yes"/"on" 为真，数字非 0 为真）。</summary>
