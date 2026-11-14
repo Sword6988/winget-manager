@@ -101,7 +101,8 @@ public sealed class RuntimeCacheTests
         var path = TempFile("metadata-cache.json");
         File.WriteAllText(
             path,
-            "{\"schema\":1,\"entries\":{\"good.app\":{\"dep\":true,\"checkedAt\":\"2026-01-01T00:00:00+08:00\"},"
+            "{\"schema\":1,\"rules\":" + RuntimeCache.RulesVersion
+            + ",\"entries\":{\"good.app\":{\"dep\":true,\"checkedAt\":\"2026-01-01T00:00:00+08:00\"},"
             + "\"bad.app\":{\"dep\":\"yes\",\"checkedAt\":\"x\"},\"nested.app\":42}}");
 
         var cache = new RuntimeCache(path, TempLog());
@@ -112,9 +113,9 @@ public sealed class RuntimeCacheTests
     }
 
     [Fact]
-    public void Load_ReadsPythonWrittenFile()
+    public void Load_ReadsPythonWrittenFile_AndPrunesPromotionsWithoutRules()
     {
-        // Python 版 json.dumps(ensure_ascii=False, indent=2) 的产物形态（含中文键不出现，但结构一致）
+        // Python 版 json.dumps(ensure_ascii=False, indent=2) 的产物形态：没有 rules 字段
         var path = TempFile("metadata-cache.json");
         File.WriteAllText(
             path,
@@ -124,9 +125,53 @@ public sealed class RuntimeCacheTests
 
         var cache = new RuntimeCache(path, TempLog());
 
-        Assert.True(cache.Get("Microsoft.VSTOR"));
+        // 结构照读，但缺 rules → 按规则 1：dep=true 的结论作废重判，dep=false 保留
+        Assert.Null(cache.Get("Microsoft.VSTOR"));
         Assert.False(cache.Get("Rustlang.Rustup"));
-        Assert.Equal(2, cache.Count);
+        Assert.Equal(1, cache.Count);
+    }
+
+    [Fact]
+    public void Load_CurrentRulesKeepsPromotions()
+    {
+        var path = TempFile("metadata-cache.json");
+        File.WriteAllText(
+            path,
+            "{\"schema\":1,\"rules\":" + RuntimeCache.RulesVersion
+            + ",\"entries\":{\"microsoft.vstor\":{\"dep\":true,\"checkedAt\":\"2026-11-14T10:00:00+08:00\"}}}");
+
+        var cache = new RuntimeCache(path, TempLog());
+
+        Assert.True(cache.Get("Microsoft.VSTOR"));
+        Assert.Equal(1, cache.Count);
+    }
+
+    [Fact]
+    public void Load_NewerRulesVersionAlsoPrunesPromotions()
+    {
+        // 降级运行（文件由更高规则版本写入）：结论来源不明，同样重判
+        var path = TempFile("metadata-cache.json");
+        File.WriteAllText(
+            path,
+            "{\"schema\":1,\"rules\":99,\"entries\":{\"a.b\":{\"dep\":true,\"checkedAt\":\"x\"}}}");
+
+        var cache = new RuntimeCache(path, TempLog());
+
+        Assert.Null(cache.Get("a.b"));
+        Assert.Equal(0, cache.Count);
+    }
+
+    [Fact]
+    public void Put_WritesRulesVersion()
+    {
+        var path = TempFile("metadata-cache.json");
+        new RuntimeCache(path, TempLog()).Put("a.b", true);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        Assert.Equal(RuntimeCache.RulesVersion, document.RootElement.GetProperty("rules").GetInt32());
+
+        // 规则版本对上之后，新读入不再作废
+        Assert.True(new RuntimeCache(path, TempLog()).Get("a.b"));
     }
 
     [Fact]
@@ -141,6 +186,7 @@ public sealed class RuntimeCacheTests
         // 顶层 key 顺序与 Python dict 一致：schema 在前、entries 在后；两空格缩进
         Assert.StartsWith("{\n  \"schema\": 1,\n  \"entries\": {", text, StringComparison.Ordinal);
         Assert.Contains("\"dep\": true", text, StringComparison.Ordinal);
+        Assert.Contains("\"rules\": " + RuntimeCache.RulesVersion, text, StringComparison.Ordinal);
         Assert.EndsWith("\n", text, StringComparison.Ordinal);
     }
 

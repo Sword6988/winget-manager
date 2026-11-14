@@ -46,6 +46,23 @@ public sealed class CatalogService
         "net.native", "xna",
     };
 
+    /// <summary>开发工具链标记词：命中即进入「SDK 豁免」判定。</summary>
+    public const string SdkKeyword = "sdk";
+
+    /// <summary>
+    /// 强运行库词：名称里同时出现 <c>sdk</c> 与这些词时照判运行库
+    /// （<c>Windows App SDK Runtime</c> 是真的运行时，不能被豁免）。
+    ///
+    /// <para>
+    /// 注意这里<b>只放「整包即运行库」的词</b>，不放 <c>runtime</c> 之外的泛词：
+    /// 豁免的对象是「含运行时的开发工具」，判据是它自己是不是运行时分发件。
+    /// </para>
+    /// </summary>
+    public static readonly IReadOnlyList<string> SdkOverrideKeywords = new[]
+    {
+        "runtime", "redistributable", "vcredist", "vclibs",
+    };
+
     private readonly AppConfig _config;
     private readonly WingetRepository _repository;
     private readonly RuntimeCache? _cache;
@@ -308,7 +325,7 @@ public sealed class CatalogService
     }
 
     /// <summary>
-    /// 关键词初判：名称或包 ID 命中运行库词表即算运行库。
+    /// 关键词初判：名称或包 ID 命中运行库词表即算运行库；但「开发工具链」先豁免。
     /// </summary>
     /// <param name="raw">原始行。</param>
     /// <returns>是否疑似运行库。</returns>
@@ -317,9 +334,61 @@ public sealed class CatalogService
         ArgumentNullException.ThrowIfNull(raw);
 
         var haystack = (raw.Name + " " + raw.PackageId).ToLowerInvariant();
-        foreach (var keyword in DependencyKeywords)
+        if (IsSdkLike(haystack))
         {
-            if (haystack.Contains(keyword, StringComparison.Ordinal))
+            return false;
+        }
+
+        return MatchesAny(haystack, DependencyKeywords);
+    }
+
+    /// <summary>
+    /// 是不是「开发工具链」：名称/ID 里带 <c>sdk</c>，且没有任何强运行库词。
+    ///
+    /// <para>
+    /// 为什么要单独豁免：<c>Microsoft .NET SDK 10.0.402</c> 的包 ID 是
+    /// <c>Microsoft.DotNet.SDK.10</c>，被 <c>dotnet</c> 词条命中，于是和
+    /// <c>.NET Runtime</c> 一起被打进「运行库」组。可 SDK 是<b>用户主动装的开发工具链</b>
+    /// （带 <c>dotnet</c> 命令、动辄上 GB），勾选「运行库」整组重装会把它一起带上；
+    /// 而 <c>Windows Software Development Kit</c> 因为名字里没有 <c>dotnet</c> 反倒留在
+    /// 「软件」组——同为开发工具却分居两组，说明纯子串匹配的边界本来就不该这么划。
+    /// </para>
+    /// <para>
+    /// 判据只两条：含 <c>sdk</c> ∧ 不含 <see cref="SdkOverrideKeywords"/>。
+    /// 所以 <c>dotnet-runtime-10.0.2</c>、<c>Windows App SDK Runtime</c> 照判运行库。
+    /// </para>
+    /// </summary>
+    /// <param name="name">显示名称（可空）。</param>
+    /// <param name="packageId">包 ID（可空）。</param>
+    /// <returns>true = 开发工具链，不算运行库。</returns>
+    public static bool IsSdkLike(string? name, string? packageId)
+    {
+        var haystack = ((name ?? string.Empty) + " " + (packageId ?? string.Empty)).ToLowerInvariant();
+        return IsSdkLike(haystack);
+    }
+
+    /// <summary>
+    /// 元数据给的信号词是不是「整包即运行库」的分发件（<c>redistributable</c> / <c>redist</c>）。
+    /// </summary>
+    /// <param name="signal">命中的信号词。</param>
+    /// <returns>true = 强信号，不应被 SDK 豁免。</returns>
+    public static bool IsRedistributableSignal(string? signal)
+    {
+        return signal is not null && signal.Contains("redist", StringComparison.Ordinal);
+    }
+
+    /// <summary>已小写的 haystack 上的 SDK 判定（两个入口共用同一份规则）。</summary>
+    private static bool IsSdkLike(string loweredHaystack)
+    {
+        return loweredHaystack.Contains(SdkKeyword, StringComparison.Ordinal)
+            && !MatchesAny(loweredHaystack, SdkOverrideKeywords);
+    }
+
+    private static bool MatchesAny(string loweredHaystack, IReadOnlyList<string> keywords)
+    {
+        foreach (var keyword in keywords)
+        {
+            if (loweredHaystack.Contains(keyword, StringComparison.Ordinal))
             {
                 return true;
             }

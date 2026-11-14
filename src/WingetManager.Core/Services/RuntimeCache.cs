@@ -12,16 +12,29 @@ namespace WingetManager.Services;
 /// <summary>
 /// 运行库判定的磁盘缓存（对应 <c>metadata.RuntimeCache</c>）。
 ///
-/// 结构：<c>{"schema":1,"entries":{"&lt;id 小写&gt;":{"dep":bool,"checkedAt":ISO}}}</c>
+/// 结构：<c>{"schema":1,"entries":{"&lt;id 小写&gt;":{"dep":bool,"checkedAt":ISO}},"rules":2}</c>
 /// 语义：<c>dep=true</c> → 元数据确认是运行库（只补漏，会覆盖关键词初判）；
 /// <c>dep=false</c> → 已核查过、描述/标记里没有运行库信号，仅用于避免下一轮重复
 /// <c>winget show</c>，<b>不是对「它是软件」的权威否定</b>。命中任一值即不再发起 show；
 /// 查询失败不写缓存。文件损坏/结构不符一律回退空缓存（重建只是多花几分钟）。
+///
+/// <para>
+/// <c>rules</c> 是判定规则版本：规则一改，旧文件里的 <c>dep=true</c> 结论就不再可信，
+/// 读取时直接丢弃重判（<c>dep=false</c> 保留——它只表示「当时没看到运行库信号」，
+/// 丢掉只会白花几分钟重查，且它永远不会让包跑错组）。
+/// 没有这个字段的老文件按规则 1 处理。
+/// </para>
 /// </summary>
 public sealed class RuntimeCache
 {
     /// <summary>缓存 schema 版本（与 Python 版 SCHEMA_VERSION 一致，两版本可互换）。</summary>
     public const int SchemaVersion = MetadataCacheFile.CurrentSchema;
+
+    /// <summary>当前判定规则版本；规则变了 → 旧的「是运行库」结论重判（见类型注释）。</summary>
+    public const int RulesVersion = MetadataCacheFile.CurrentRules;
+
+    /// <summary>没有 <c>rules</c> 字段的历史文件按规则 1 处理。</summary>
+    public const int LegacyRulesVersion = 1;
 
     private readonly object _gate = new();
     private readonly string _path;
@@ -153,6 +166,15 @@ public sealed class RuntimeCache
                 return entries;
             }
 
+            // 老文件没有 rules 字段 → 按规则 1（引入版本化之前）处理
+            var rules = LegacyRulesVersion;
+            if (root.TryGetProperty("rules", out var rulesElement)
+                && rulesElement.ValueKind == JsonValueKind.Number
+                && rulesElement.TryGetInt32(out var rulesValue))
+            {
+                rules = rulesValue;
+            }
+
             foreach (var property in entriesElement.EnumerateObject())
             {
                 if (property.Value.ValueKind != JsonValueKind.Object)
@@ -179,6 +201,11 @@ public sealed class RuntimeCache
                     CheckedAt = checkedAt,
                 };
             }
+
+            if (rules != RulesVersion)
+            {
+                PruneStalePromotions(entries, rules);
+            }
         }
         catch (JsonException ex)
         {
@@ -199,6 +226,40 @@ public sealed class RuntimeCache
         return entries;
     }
 
+    /// <summary>
+    /// 规则版本变了：丢掉 <c>dep=true</c> 的结论，让它们下一轮重新核查。
+    ///
+    /// <para>
+    /// 只丢「是运行库」这一侧。这类结论会被 <c>cachedDependency == true</c> 直接覆盖关键词初判，
+    /// 一旦判错就永久固化（<c>Node.js</c> 被描述里的「JavaScript runtime」判进运行库就是例子）；
+    /// <c>dep=false</c> 只是「当时没看到信号」的备忘录，丢掉纯属白费几分钟重查，不必丢。
+    /// </para>
+    /// </summary>
+    private void PruneStalePromotions(Dictionary<string, MetadataCacheEntry> entries, int rules)
+    {
+        var stale = new List<string>();
+        foreach (var pair in entries)
+        {
+            if (pair.Value.Dep)
+            {
+                stale.Add(pair.Key);
+            }
+        }
+
+        if (stale.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var key in stale)
+        {
+            entries.Remove(key);
+        }
+
+        _log.Info("元数据缓存规则版本 {0} → {1}：{2} 条「运行库」结论作废，将重新核查",
+                  rules, RulesVersion, stale.Count);
+    }
+
     /// <summary>落盘（原子写）；失败只记日志——缓存丢了只是下次多查一遍。</summary>
     private void Save()
     {
@@ -208,6 +269,7 @@ public sealed class RuntimeCache
             {
                 Schema = SchemaVersion,
                 Entries = new Dictionary<string, MetadataCacheEntry>(_entries, StringComparer.Ordinal),
+                Rules = RulesVersion,
             };
             AtomicFile.WriteJson(_path, payload, AppJsonContext.Compat.MetadataCacheFile);
         }

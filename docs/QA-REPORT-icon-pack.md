@@ -612,3 +612,75 @@ TwoWay 可能把非用户意图的 false/null 回写到行对象，形成同类�
 本版不动；若要把它留在「软件」，应在元数据信号层加白名单，而不是在关键词层做例外。
 
 **版本**：`App.Version` 3.0.1 → **3.0.2**。
+
+### 10.15 三处 P3 修复（v3.0.3）：SDK 误判、缓存结论固化、核查无进度
+
+10.14 修完"分组跳变"后，用只读探针 `qa-classprobe` 跑真实 `winget list`（172 项）复核分类质量，
+又发现三个 P3。此版本一起修掉；两处 P4（元数据缓存只增不减、同 ID 多行去重取"先出现的"）
+评估后不动——收益抵不上改动面。
+
+#### F10：`.NET SDK` 被判成运行库（P3）
+
+**现象**：`Microsoft .NET SDK 10.0.402`（ID `Microsoft.DotNet.SDK.10`）与 `8.0.427` 落在「运行库」组，
+而 `Windows Software Development Kit - 10.0.26100` 落在「软件」组。两者同为开发工具链，只因前者
+ID 里带 `dotnet` 被词表命中。
+
+**影响**：勾选「运行库」整组重装/卸载会把一个 GB 级的 SDK 一起带上；而用户对这一组的心理预期是
+「都是小东西，可以放心全选」。
+
+**根因**：`IsDependencyByKeyword` 是纯子串 `Contains`，没有豁免层。`.NET SDK` 含运行时 ≠ 它是运行时。
+
+**修复**（`CatalogService`）：
+
+| 项 | 内容 |
+|---|---|
+| `SdkKeyword` | `"sdk"` |
+| `SdkOverrideKeywords` | `runtime` / `redistributable` / `vcredist` / `vclibs`——命中这些词时**不豁免**（`Windows App SDK Runtime` 是真运行时） |
+| `IsSdkLike(name, id)` | 含 `sdk` ∧ 不含强运行库词 → 开发工具链，判「软件」 |
+| `IsRedistributableSignal(signal)` | 元数据信号里 `redist*` 属强信号，压过 SDK 豁免 |
+| `IsDependencyByKeyword` | 先走 `IsSdkLike` 豁免，再匹配词表 |
+
+**第二道闸**：只改关键词层不够——`.NET SDK` 的描述自称"includes the .NET runtime"，
+后台 `winget show` 会把它又判回运行库（`cachedDependency == true` 直接覆盖关键词初判）。
+因此 `EnrichmentWorker` 在写缓存前再判一次：`IsSdkLike ∧ 非 redist 信号 → 不提升`，
+计入 `EnrichmentSummary.SdkExempted` 并写日志。
+
+#### F11：元数据结论永久固化（P3）
+
+**现象**：`metadata-cache.json` 只有 `dep` 和 `checkedAt`，没有规则版本。`Node.js` 被描述里的
+"JavaScript runtime" 判成运行库后写进缓存，**永远**是运行库；以后信号规则改宽或改严，旧结论也不会重判。
+
+**修复**：缓存文件加顶层 `rules` 字段（写在 `entries` 之后，不打乱 Python `dict` 的既有键序）。
+
+- `MetadataCacheFile.CurrentRules = 2`（1 = 没有该字段的历史版本；2 = 引入 SDK 豁免）；
+- 读取时 `rules != CurrentRules` → 丢弃所有 `dep=true` 条目并记日志，下一轮重新核查；
+- `dep=false` 保留：它只表示"当时没看到运行库信号"，丢掉纯属白花几分钟重查，且它不会让包跑错组；
+- 降级运行（读到更高版本写入的文件）同样重判。
+
+#### F12：核查阶段没有任何进度反馈（P3）
+
+**现象**：56 个包串行跑 159 秒，期间列表一条条改分组，状态栏一句话都没有——10.14 那次
+「有个延迟」的抱怨，一半原因是没有解释。
+
+**修复**：`EnrichmentWorker` 新增 `Progress` 事件（`EnrichmentProgress(Done, Total, Promoted)`），
+每处理完一条发一次（`try/finally` 保证 `continue`/`break` 不漏报），开始时先报 `0/N`；
+`MainViewModel` 用新的 `EnrichmentText` 属性在状态栏第二行显示「后台核对元数据 12/56（补漏 1）」，
+扫描/后台刷新期间不写、核查结束清空，`Dispose` 与重建 worker 时同步解绑。
+
+#### 验证
+
+- 新增 23 例单测：SDK 关键词豁免 6 例、`IsSdkLike` 5 例、`IsRedistributableSignal` 5 例、
+  缓存规则版本 4 例（当前版本保留 / 老文件只清 `dep=true` / 更高版本同样清 / 落盘写入版本号）、
+  富化任务 4 例（`FakeShowRepository` 顶掉子进程：SDK 不被元数据拉回、真运行时不被豁免、
+  redist 压过豁免、进度从 `0/N` 走到 `N/N`）；
+- 全量 **294 / 294 通过**（原 271）；
+- `qa-classprobe` 复核：`Microsoft .NET SDK 10.0.402` / `8.0.427` 归入「软件」，
+  `Windows App SDK Runtime` 等仍在「运行库」。
+
+#### 取舍
+
+`Node.js` 仍会被元数据判入「运行库」（描述自称 JavaScript runtime）。这是产品口径而非 bug：
+要把它留在「软件」，应在元数据信号层加白名单，而不是在关键词层开例外。
+本版未动——等真的困扰再单独定。
+
+**版本**：`App.Version` 3.0.2 → **3.0.3**。

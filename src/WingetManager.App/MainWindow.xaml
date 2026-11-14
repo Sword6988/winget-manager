@@ -308,6 +308,12 @@
                 FontSize="11"
                 Foreground="{ThemeResource AppSubtleTextBrush}"
                 Visibility="{x:Bind app:UiConverters.VisibleIfAny(ViewModel.ElapsedText), Mode=OneWay}" />
+            <TextBlock
+                Text="{x:Bind ViewModel.EnrichmentText, Mode=OneWay}"
+                TextTrimming="CharacterEllipsis"
+                FontSize="11"
+                Foreground="{ThemeResource AppSubtleTextBrush}"
+                Visibility="{x:Bind app:UiConverters.VisibleIfAny(ViewModel.EnrichmentText), Mode=OneWay}" />
           </StackPanel>
 
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">

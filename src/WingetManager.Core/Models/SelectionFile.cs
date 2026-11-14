@@ -8,13 +8,25 @@ using WingetManager.Infra;
 namespace WingetManager.Models;
 
 /// <summary>
-/// 运行库判定缓存文件 DTO：<c>{"schema":1,"entries":{"&lt;id 小写&gt;":{"dep":bool,"checkedAt":ISO}}}</c>。
-/// schema=1 与 Python 版完全一致，两版本可互换读写（ARCHITECTURE §5 UNCLEAR#6）。
+/// 运行库判定缓存文件 DTO：<c>{"schema":1,"entries":{...},"rules":2}</c>。
+/// schema=1 与 Python 版完全一致，两版本可互换读写（ARCHITECTURE §5 UNCLEAR#6）；
+/// <c>rules</c> 是本版新增的<b>判定规则版本</b>，Python 版读文件时忽略它即可，
+/// 写在 <c>entries</c> 之后是为了不打乱 Python <c>dict</c> 的既有键序。
 /// </summary>
 public sealed class MetadataCacheFile
 {
     /// <summary>当前 schema 版本；与 Python 版 SCHEMA_VERSION 相同。</summary>
     public const int CurrentSchema = 1;
+
+    /// <summary>
+    /// 当前判定规则版本：规则（元数据信号词、SDK 豁免等）一改就 +1，
+    /// 旧版本缓存里的「运行库」结论会在读取时被丢弃并重判。
+    /// <list type="bullet">
+    /// <item>1 = 历史版本（没有这个字段的时代）；</item>
+    /// <item>2 = 引入 SDK 豁免（开发工具链不判运行库）。</item>
+    /// </list>
+    /// </summary>
+    public const int CurrentRules = 2;
 
     /// <summary>schema 版本；不等于 <see cref="CurrentSchema"/> 时整份缓存作废。</summary>
     [JsonPropertyName("schema")]
@@ -23,6 +35,10 @@ public sealed class MetadataCacheFile
     /// <summary>条目表：key 为小写包 ID。</summary>
     [JsonPropertyName("entries")]
     public Dictionary<string, MetadataCacheEntry> Entries { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>写这份文件时用的规则版本；缺省（老文件）按 1 算。</summary>
+    [JsonPropertyName("rules")]
+    public int Rules { get; set; } = CurrentRules;
 }
 
 /// <summary>缓存里的单条记录。</summary>

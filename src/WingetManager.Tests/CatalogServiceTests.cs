@@ -162,11 +162,42 @@ public sealed class CatalogServiceTests
     [InlineData("Node.js", "openjs.nodejs", false)]
     [InlineData("Google Chrome", "Google.Chrome", false)]
     [InlineData("7-Zip", "7zip.7zip", false)]
+    // SDK 豁免：开发工具链含运行时不等于就是运行时，判「软件」
+    // （用户机器上 .NET SDK 因 ID 带 dotnet 被打进「运行库」，跟 Windows SDK 分居两组）
+    [InlineData("Microsoft .NET SDK 10.0.402", "Microsoft.DotNet.SDK.10", false)]
+    [InlineData("Microsoft .NET SDK 8.0.427 (x64)", "Microsoft.DotNet.SDK.8", false)]
+    [InlineData("Windows Software Development Kit - 10.0.26100", "Microsoft.WindowsSDK.10.0.26100", false)]
+    [InlineData("Android SDK Platform-Tools", "Google.PlatformTools", false)]
+    // 但「SDK 里带强运行库词」的照判运行库：Windows App SDK Runtime 是真的运行时
+    [InlineData("Windows App SDK Runtime", "Microsoft.WindowsAppRuntime.1.7", true)]
+    [InlineData("Microsoft .NET Runtime (SDK-less)", "Microsoft.DotNet.Runtime.10", true)]
     public void IsDependencyByKeyword_MatchesNameOrId(string name, string packageId, bool expected)
     {
         var raw = new RawPackage(name, packageId);
 
         Assert.Equal(expected, CatalogService.IsDependencyByKeyword(raw));
+    }
+
+    [Theory]
+    [InlineData("Microsoft .NET SDK 10.0.402", "Microsoft.DotNet.SDK.10", true)]
+    [InlineData("Windows App SDK Runtime", "Microsoft.WindowsAppRuntime.1.7", false)] // 含 runtime → 不是「纯开发工具」
+    [InlineData("Microsoft Visual C++ Redistributable", "Microsoft.VCRedist.2015+.x64", false)]
+    [InlineData("Git", "Git.Git", false)]
+    [InlineData(null, null, false)]
+    public void IsSdkLike_OnlyWhenSdkWithoutRuntimeWords(string? name, string? packageId, bool expected)
+    {
+        Assert.Equal(expected, CatalogService.IsSdkLike(name, packageId));
+    }
+
+    [Theory]
+    [InlineData("redistributable", true)]
+    [InlineData("redist", true)]
+    [InlineData("runtime", false)]
+    [InlineData("运行库", false)]
+    [InlineData(null, false)]
+    public void IsRedistributableSignal_OnlyRedistWordsOverrideSdk(string? signal, bool expected)
+    {
+        Assert.Equal(expected, CatalogService.IsRedistributableSignal(signal));
     }
 
     [Theory]

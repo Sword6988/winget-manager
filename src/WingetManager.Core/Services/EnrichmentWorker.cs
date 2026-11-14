@@ -19,7 +19,15 @@ public sealed record MetadataChange(string PackageId, string Name, bool IsDepend
 /// <param name="Kept">确认为软件的条数。</param>
 /// <param name="Failed">判定不出（下次重试）的条数。</param>
 /// <param name="Cancelled">是否被取消。</param>
-public sealed record EnrichmentSummary(int Checked, int Promoted, int Kept, int Failed, bool Cancelled);
+/// <param name="SdkExempted">元数据本想判运行库、但被 SDK 豁免拉回软件的条数。</param>
+public sealed record EnrichmentSummary(int Checked, int Promoted, int Kept, int Failed, bool Cancelled,
+                                      int SdkExempted = 0);
+
+/// <summary>一轮富化的进度（每处理完一条包 ID 发一次）。</summary>
+/// <param name="Done">已处理的条数（含跳过/失败）。</param>
+/// <param name="Total">本轮总条数。</param>
+/// <param name="Promoted">其中已改判为运行库的条数。</param>
+public sealed record EnrichmentProgress(int Done, int Total, int Promoted);
 
 /// <summary>
 /// 后台元数据富化任务（对应 Python 版 <c>MetadataWorker</c>）。
@@ -64,6 +72,9 @@ public sealed class EnrichmentWorker
 
     /// <summary>一批改判（在后台线程触发，订阅方负责切 UI 线程）。</summary>
     public event Action<IReadOnlyList<MetadataChange>>? Changes;
+
+    /// <summary>进度（在后台线程触发，每处理完一条发一次）。</summary>
+    public event Action<EnrichmentProgress>? Progress;
 
     /// <summary>一轮结束（在后台线程触发）。</summary>
     public event Action<EnrichmentSummary>? Completed;
@@ -165,10 +176,13 @@ public sealed class EnrichmentWorker
                                Func<bool>? isScanActive,
                                CancellationToken cancellationToken)
     {
+        var total = pendingIds.Count;
+        var processed = 0;
         var checkedCount = 0;
         var promoted = 0;
         var kept = 0;
         var failed = 0;
+        var sdkExempted = 0;
         var batch = new List<MetadataChange>(BatchSize);
 
         void Flush()
@@ -190,63 +204,100 @@ public sealed class EnrichmentWorker
             }
         }
 
+        void Report()
+        {
+            try
+            {
+                Progress?.Invoke(new EnrichmentProgress(processed, total, promoted));
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("元数据进度回调失败：{0}", ex.Message);
+            }
+        }
+
+        // 先报一次 0/N：一轮要查几十条、耗时几分钟，界面得先有个「在查什么、还有多少」
+        Report();
+
         try
         {
             foreach (var packageId in pendingIds)
             {
-                if (!await WaitForScanIdleAsync(isScanActive, cancellationToken).ConfigureAwait(false))
-                {
-                    break;
-                }
-
-                if (_cache.Get(packageId) is not null)
-                {
-                    continue; // 别的轮次已核查过：跳过，不再发起 show
-                }
-
-                string text;
+                processed++;
                 try
                 {
-                    text = await FetchShowOutputAsync(packageId, cancellationToken).ConfigureAwait(false);
-                }
-                catch (ScanCancelledException)
-                {
-                    break;
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-
-                checkedCount++;
-                var (isDependency, signal) = RuntimeMetadataService.AnalyzeRuntimeSignal(text);
-                if (isDependency is null)
-                {
-                    failed++; // 查询失败/解析不出：不写缓存，下次再试
-                    continue;
-                }
-
-                _cache.Put(packageId, isDependency.Value);
-                if (isDependency.Value)
-                {
-                    promoted++;
-                }
-                else
-                {
-                    kept++;
-                }
-
-                var hasKeyword = keywordDependencies.TryGetValue(packageId, out var keyword);
-                if (!hasKeyword || isDependency.Value != keyword)
-                {
-                    // 只报「改判」：与关键词初判一致的不用打扰用户
-                    // （初判缺失时按 Python 版口径一律上报）
-                    var name = names.TryGetValue(packageId, out var display) ? display : packageId;
-                    batch.Add(new MetadataChange(packageId, name, isDependency.Value, signal));
-                    if (batch.Count >= BatchSize)
+                    if (!await WaitForScanIdleAsync(isScanActive, cancellationToken).ConfigureAwait(false))
                     {
-                        Flush();
+                        break;
                     }
+
+                    if (_cache.Get(packageId) is not null)
+                    {
+                        continue; // 别的轮次已核查过：跳过，不再发起 show
+                    }
+
+                    string text;
+                    try
+                    {
+                        text = await FetchShowOutputAsync(packageId, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (ScanCancelledException)
+                    {
+                        break;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    checkedCount++;
+                    var (isDependency, signal) = RuntimeMetadataService.AnalyzeRuntimeSignal(text);
+                    if (isDependency is null)
+                    {
+                        failed++; // 查询失败/解析不出：不写缓存，下次再试
+                        continue;
+                    }
+
+                    var name = names.TryGetValue(packageId, out var display) ? display : packageId;
+
+                    // SDK 豁免的第二道闸：关键词层已经把 .NET SDK / Windows SDK 判成软件，
+                    // 但它们的描述里常写着「包含运行时」，元数据会把它又拽回运行库。
+                    // 只有「整包即分发件」的强信号（redistributable / redist）才压过豁免。
+                    if (isDependency.Value
+                        && CatalogService.IsSdkLike(name, packageId)
+                        && !CatalogService.IsRedistributableSignal(signal))
+                    {
+                        isDependency = false;
+                        signal = null;
+                        sdkExempted++;
+                    }
+
+                    _cache.Put(packageId, isDependency.Value);
+                    if (isDependency.Value)
+                    {
+                        promoted++;
+                    }
+                    else
+                    {
+                        kept++;
+                    }
+
+                    var hasKeyword = keywordDependencies.TryGetValue(packageId, out var keyword);
+                    if (!hasKeyword || isDependency.Value != keyword)
+                    {
+                        // 只报「改判」：与关键词初判一致的不用打扰用户
+                        // （初判缺失时按 Python 版口径一律上报）
+                        batch.Add(new MetadataChange(packageId, name, isDependency.Value, signal));
+                        if (batch.Count >= BatchSize)
+                        {
+                            Flush();
+                        }
+                    }
+                }
+                finally
+                {
+                    // continue / break 都会走到这里：进度不漏报任何一条
+                    Report();
                 }
             }
         }
@@ -260,7 +311,7 @@ public sealed class EnrichmentWorker
         {
             Flush();
             var summary = new EnrichmentSummary(checkedCount, promoted, kept, failed,
-                                               cancellationToken.IsCancellationRequested);
+                                               cancellationToken.IsCancellationRequested, sdkExempted);
             try
             {
                 Completed?.Invoke(summary);

@@ -151,6 +151,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _elapsedText = string.Empty;
 
+    /// <summary>
+    /// 后台元数据核查的进度提示（如「后台核对 12/56 · 补漏 1」）。
+    ///
+    /// 一轮核查几十条、串行跑两分多钟，期间列表会一条条改分组；没有这行字，
+    /// 用户看到的就是「包自己换了页签」加一段不明所以的延迟。
+    /// </summary>
+    [ObservableProperty]
+    private string _enrichmentText = string.Empty;
+
     /// <summary>未找到 winget 的说明（缺 winget 引导页展示）。</summary>
     [ObservableProperty]
     private string _wingetErrorText = string.Empty;
@@ -291,6 +300,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ScanButtonText));
         ShowGuide = false;
         ElapsedText = "已用 0.0s · 点「取消扫描」可中断";
+        EnrichmentText = string.Empty; // 上一轮核查已被取消，进度字符串作废
         if (!silentRefresh)
         {
             // 静默刷新时保留「已加载上次扫描结果（…），正在后台刷新…」的提示
@@ -787,6 +797,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    /// <summary>一条核查进度（后台线程触发 → 切 UI 线程）。</summary>
+    private void OnEnrichmentProgress(EnrichmentProgress progress)
+    {
+        UiDispatch.Post(() =>
+        {
+            if (_disposed || IsScanning || progress.Total <= 0)
+            {
+                return;
+            }
+
+            EnrichmentText = string.Format(
+                CultureInfo.InvariantCulture,
+                "后台核对元数据 {0}/{1}（补漏 {2}）",
+                progress.Done,
+                progress.Total,
+                progress.Promoted);
+        });
+    }
+
     /// <summary>一轮核查结束（后台线程触发）。</summary>
     private void OnEnrichmentCompleted(EnrichmentSummary summary)
     {
@@ -797,9 +826,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            EnrichmentText = string.Empty;
             _log.Info(
-                "元数据核查结束：查 {0}，补漏 {1}，确认非运行库 {2}，失败 {3}，取消 {4}",
-                summary.Checked, summary.Promoted, summary.Kept, summary.Failed, summary.Cancelled);
+                "元数据核查结束：查 {0}，补漏 {1}，SDK 豁免 {2}，确认非运行库 {3}，失败 {4}，取消 {5}",
+                summary.Checked, summary.Promoted, summary.SdkExempted, summary.Kept, summary.Failed,
+                summary.Cancelled);
         });
     }
 
@@ -807,6 +838,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         var worker = new EnrichmentWorker(_repository, _cache, _log);
         worker.Changes += OnMetadataChanges;
+        worker.Progress += OnEnrichmentProgress;
         worker.Completed += OnEnrichmentCompleted;
         return worker;
     }
@@ -836,6 +868,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _repository = new WingetRepository(_config, _log);
         _catalog = new CatalogService(_config, _repository, _cache, _log, _snapshotStore);
         _enricher.Changes -= OnMetadataChanges;
+        _enricher.Progress -= OnEnrichmentProgress;
         _enricher.Completed -= OnEnrichmentCompleted;
         _enricher.Cancel();
         _enricher = CreateEnricher();
@@ -1239,6 +1272,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         StopElapsedTimer();
         _enricher.Changes -= OnMetadataChanges;
+        _enricher.Progress -= OnEnrichmentProgress;
         _enricher.Completed -= OnEnrichmentCompleted;
         _enricher.Cancel();
 
