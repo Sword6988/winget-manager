@@ -56,7 +56,12 @@ public static class UiDispatch
             return;
         }
 
-        queue.TryEnqueue(DispatcherQueuePriority.Normal, () => Invoke(action));
+        if (!queue.TryEnqueue(DispatcherQueuePriority.Normal, () => Invoke(action)))
+        {
+            // 审计 F5：TryEnqueue 只在队列关闭（应用退出中）时返回 false，动作被丢弃——
+            // 至少留痕，否则「该刷的界面没刷」无从查起。
+            LogService.Shared.Warn("UI 队列已关闭，动作被丢弃：{0}", action.Method.Name);
+        }
     }
 
     /// <summary>把一次异步操作切回 UI 线程继续（等待期间不阻塞 UI 线程）。</summary>

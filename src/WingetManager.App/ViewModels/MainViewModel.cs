@@ -392,8 +392,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
+        // RebuildGroups 内部已调 UpdateCounts，这里不再重复调用（审计 F7）
         RebuildGroups();
-        UpdateCounts();
         OnPropertyChanged(nameof(WingetVersionText));
 
         var duration = snapshot.DurationMs / 1000.0;

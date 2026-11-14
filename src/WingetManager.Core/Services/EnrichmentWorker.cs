@@ -250,6 +250,12 @@ public sealed class EnrichmentWorker
                 }
             }
         }
+        catch (Exception ex)
+        {
+            // 审计 F4 兜底：循环里的意外异常不该变成无人观察的任务异常静默消失
+            // （Task.Run 的结果没人 await），至少留下日志；已查到的改判照常在 finally 里刷出。
+            _log.Error("元数据富化意外中断：{0}", ex);
+        }
         finally
         {
             Flush();

@@ -157,7 +157,6 @@ public class WingetRepository
     private CommandResult RunOnce(IReadOnlyList<string> argv, TimeSpan alreadyElapsed, TimeSpan deadline,
                                   int totalLimitSeconds, CancellationToken cancellationToken)
     {
-        var argsText = string.Join(' ', argv);
         var sw = Stopwatch.StartNew();
 
         var startInfo = new ProcessStartInfo

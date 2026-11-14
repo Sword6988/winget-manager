@@ -129,9 +129,11 @@ public sealed partial class MainWindow : Window, IMainView
 
         var x = bounds.X;
         var y = bounds.Y;
-        if (x < -10000 || y < -10000)
+        if (IsOffScreen(x, y, width, height))
         {
-            // 记录值明显来自已断开的显示器，回到默认位置，别把窗口开到看不到的地方
+            // 记录值来自已断开或缩小的显示器（拔掉副屏、改了分辨率、投影模式切换），
+            // 回到默认位置，别把窗口开到看不见的地方（审计 F3：此前只防 x/y < -10000
+            // 这一种极端情况，拔掉右侧副屏这种常见场景防不住）。
             x = WindowBounds.Default.X;
             y = WindowBounds.Default.Y;
         }
@@ -141,6 +143,33 @@ public sealed partial class MainWindow : Window, IMainView
         if (bounds.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.Maximize();
+        }
+    }
+
+    /// <summary>
+    /// 窗口矩形与最近显示器的可见区域<b>完全没有交集</b>时视为离屏（审计 F3）。
+    /// 探测失败保守返回 false（保留用户记录的位置），绝不让恢复尺寸这件事崩掉启动。
+    /// </summary>
+    private bool IsOffScreen(int x, int y, int width, int height)
+    {
+        if (x < -10000 || y < -10000)
+        {
+            // 记录值明显来自已断开的显示器，回到默认位置，别把窗口开到看不到的地方
+            return true;
+        }
+
+        try
+        {
+            var work = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest).WorkArea;
+            return x >= work.X + work.Width
+                   || y >= work.Y + work.Height
+                   || x + width <= work.X
+                   || y + height <= work.Y;
+        }
+        catch (Exception ex)
+        {
+            App.Log.Warn("检测窗口是否离屏失败，按在屏处理：{0}", ex.Message);
+            return false;
         }
     }
 
@@ -330,10 +359,12 @@ public sealed partial class MainWindow : Window, IMainView
 
     private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog)
     {
-        // 未打包 WinUI 3 必须显式给 XamlRoot，否则 ShowAsync 抛「This element is not associated with a XamlRoot」
-        dialog.XamlRoot = RootGrid.XamlRoot;
         try
         {
+            // 未打包 WinUI 3 必须显式给 XamlRoot，否则 ShowAsync 抛「This element is not associated with a XamlRoot」。
+            // 赋值也放进 try（审计 F2）：窗口正在关闭时读 XamlRoot 可能为 null/抛异常，
+            // 不能让弹框失败反过来炸掉调用方（导出流程的收尾提示就在这条链上）。
+            dialog.XamlRoot = RootGrid.XamlRoot;
             return await dialog.ShowAsync();
         }
         catch (Exception ex)
