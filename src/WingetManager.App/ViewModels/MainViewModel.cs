@@ -25,7 +25,7 @@ namespace WingetManager.ViewModels;
 /// 关键语义（全部对齐 Python 版）：
 /// <list type="number">
 /// <item>扫描与取消：同一按钮两态，取消在 0.2s 内真正 kill 掉 winget 子进程；</item>
-/// <item>勾选：以 <c>HashSet&lt;string&gt;</c> 为唯一真相，行对象随时可丢弃重建；</item>
+/// <item>勾选：以 <see cref="SelectionBook"/> 为唯一真相，行对象随时可丢弃重建；</item>
 /// <item>批量操作只作用于「当前可见且可勾选」的行；</item>
 /// <item>后台富化改判按批应用，一批只重建一次列表；</item>
 /// <item>勾选即时落盘 selection.json，损坏回退为空。</item>
@@ -53,7 +53,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly ExportService _export;
 
     private readonly List<Package> _packages = new();
-    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 勾选真相集合。界面上的复选框、组头文案、「已选 N 个」、导出清单全部由它派生；
+    /// 行对象（<see cref="PackageRow"/>）只是可丢弃的投影。
+    ///
+    /// 只经由 <see cref="SelectionBook"/> 的写方法变更——历史 bug 就出在「批量勾选只改了行、
+    /// 没改集合」，重建列表后勾选全部消失。
+    /// </summary>
+    private readonly SelectionBook _selected = new();
 
     private AppConfig _config;
     private WingetRepository _repository;
@@ -64,7 +72,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private DispatcherQueueTimer? _elapsedTimer;
     private DateTime _scanStartedAt;
     private CatalogSnapshot? _snapshot;
-    private bool _suppressRowEvents;
     private bool _initialized;
     private bool _disposed;
 
@@ -380,13 +387,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             // 勾选合并：只保留「本机当前存在且可重装」的 ID，
             // 卸掉的软件、或变成 winget 不支持的项不该继续躺在导出清单里
-            var selectableIds = new HashSet<string>(
-                _packages.Where(p => p.Reinstallable).Select(p => p.PackageIdentifier),
-                StringComparer.OrdinalIgnoreCase);
-            _selected.RemoveWhere(id => !selectableIds.Contains(id));
+            _selected.PruneTo(_packages.Where(p => p.Reinstallable).Select(p => p.PackageIdentifier));
 
             // 「仅看已选」不持久化，但重扫后勾选为空时必须自动关闭，否则界面看起来是空的（P0-10）
-            if (_selected.Count == 0 && OnlySelected)
+            if (_selected.IsEmpty && OnlySelected)
             {
                 OnlySelected = false;
             }
@@ -394,6 +398,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         // RebuildGroups 内部已调 UpdateCounts，这里不再重复调用（审计 F7）
         RebuildGroups();
+
+        // 剪枝可能改变了勾选集合，计数与导出口径要立刻跟上（否则底栏会停留在剪枝前的数字）
+        RefreshSelectionState();
         OnPropertyChanged(nameof(WingetVersionText));
 
         var duration = snapshot.DurationMs / 1000.0;
@@ -443,35 +450,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 continue;
             }
 
-            var row = new PackageRow(package, _selected.Contains(package.PackageIdentifier), OnRowCheckedChanged);
+            // 行的初始勾选状态只从真相集合取：行是可丢弃投影，重建后必须能还原
+            var row = new PackageRow(package, _selected.Contains(package.PackageIdentifier));
             grouped[PackageGroups.Of(package)].Add(row);
         }
 
-        _suppressRowEvents = true;
-        try
+        _groups.Clear();
+        Entries.Clear();
+        foreach (var groupName in PackageGroups.Order)
         {
-            _groups.Clear();
-            Entries.Clear();
-            foreach (var groupName in PackageGroups.Order)
+            var rows = grouped[groupName];
+            if (rows.Count == 0)
             {
-                var rows = grouped[groupName];
-                if (rows.Count == 0)
-                {
-                    continue;
-                }
-
-                var group = new PackageGroup(groupName, rows, ToggleGroupSelection);
-                _groups.Add(group);
-                Entries.Add(new GroupHeaderEntry(group));
-                foreach (var row in rows)
-                {
-                    Entries.Add(new PackageRowEntry(row));
-                }
+                continue;
             }
-        }
-        finally
-        {
-            _suppressRowEvents = false;
+
+            var group = new PackageGroup(groupName, rows, ToggleGroupSelection);
+            _groups.Add(group);
+            Entries.Add(new GroupHeaderEntry(group));
+            foreach (var row in rows)
+            {
+                Entries.Add(new PackageRowEntry(row));
+            }
         }
 
         NotifyGroupsSelectionChanged();
@@ -513,40 +513,60 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>把所有 UI 可见行的勾选状态直接刷新一遍（仅看已选场景下的重建由调用方负责）。</summary>
+    /// <summary>
+    /// 批量设置勾选（「全选」「反选」「全选本组」的唯一落点）。
+    ///
+    /// 同时改两处：行对象（界面投影）与真相集合（<see cref="_selected"/>）。
+    /// 两者必须一起改——只改行不改集合，界面看着勾上了，一切换分组重建列表就全没了
+    /// （v3.0.0 的 bug 就是这个）。
+    /// </summary>
     /// <param name="rows">目标行。</param>
     /// <param name="value">目标状态。</param>
     private void SetRowsChecked(IReadOnlyList<PackageRow> rows, bool value)
     {
-        _suppressRowEvents = true;
-        try
+        var ids = new List<string>(rows.Count);
+        foreach (var row in rows)
         {
-            foreach (var row in rows)
+            if (!row.IsSelectable)
             {
-                if (row.IsSelectable)
-                {
-                    row.IsChecked = value;
-                }
+                continue;
             }
-        }
-        finally
-        {
-            _suppressRowEvents = false;
+
+            row.IsChecked = value;
+            ids.Add(row.PackageIdentifier);
         }
 
+        _selected.SetMany(ids, value);
         PersistSelection();
         RefreshSelectionState();
     }
 
-    /// <summary>行勾选回调（<see cref="PackageRow.IsChecked"/> 变化时触发）。</summary>
-    private void OnRowCheckedChanged(PackageRow row, bool isChecked)
+    /// <summary>
+    /// 单行勾选（界面点击的唯一入口）。
+    ///
+    /// 界面用 OneWay 绑定 + <c>Click</c> 显式上报，而不是 TwoWay 绑定：
+    /// <c>CheckBox.IsChecked</c> 是 <c>bool?</c>，而列表虚拟化会回收容器并在重建时
+    /// 重置容器状态，TwoWay 可能把「非用户意图」的 false/null 写回行对象，
+    /// 直接表现为「切换分组后勾选丢失」。让数据流单向（界面只读、点击显式调用）
+    /// 从结构上消除这类误写。
+    /// </summary>
+    /// <param name="row">目标行。</param>
+    /// <param name="value">目标状态。</param>
+    /// <returns>行是否可勾选；不可勾选时调用方应把界面状态还原。</returns>
+    public bool TrySetRowChecked(PackageRow row, bool value)
     {
-        if (_suppressRowEvents)
+        if (row is null || !row.IsSelectable)
         {
-            return;
+            return false;
         }
 
-        if (isChecked)
+        if (row.IsChecked == value)
+        {
+            return true; // 已是目标状态：界面与数据一致，无需写盘
+        }
+
+        row.IsChecked = value;
+        if (value)
         {
             _selected.Add(row.PackageIdentifier);
         }
@@ -559,11 +579,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshSelectionState();
 
         // 「仅看已选」下取消勾选 -> 行应立即消失。必须延后一拍，
-        // 不能在 CheckBox 的绑定 setter 里同步重建集合（会重入虚拟化容器）。
-        if (OnlySelected && !isChecked)
+        // 不能在 CheckBox 的点击回调里同步重建集合（会重入虚拟化容器）。
+        if (OnlySelected && !value)
         {
             UiDispatch.Post(RebuildGroups);
         }
+
+        return true;
     }
 
     /// <summary>勾选落盘（小文件、原子写；失败只在日志里留痕，不影响交互）。</summary>
@@ -661,14 +683,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>从 selection.json 恢复勾选（损坏文件由 SelectionStore 兜底成空集）。</summary>
     private void RestoreSelection()
     {
-        _selected.Clear();
-        foreach (var id in _selectionStore.Load())
-        {
-            if (id.Length > 0)
-            {
-                _selected.Add(id);
-            }
-        }
+        _selected.ReplaceAll(_selectionStore.Load());
 
         SelectedCountText = "已选 " + _selected.Count.ToString(CultureInfo.InvariantCulture) + " 个";
         HasSelection = _selected.Count > 0;
@@ -989,29 +1004,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void InvertSelection()
     {
         var rows = VisibleSelectableRows();
-        var targets = rows.Where(row => !row.IsChecked).Select(row => row).ToList();
-        var clears = rows.Where(row => row.IsChecked).ToList();
-
-        _suppressRowEvents = true;
-        try
+        var ids = new List<string>(rows.Count);
+        foreach (var row in rows)
         {
-            foreach (var row in targets)
-            {
-                row.IsChecked = true;
-                _selected.Add(row.PackageIdentifier);
-            }
-
-            foreach (var row in clears)
-            {
-                row.IsChecked = false;
-                _selected.Remove(row.PackageIdentifier);
-            }
-        }
-        finally
-        {
-            _suppressRowEvents = false;
+            row.IsChecked = !row.IsChecked;
+            ids.Add(row.PackageIdentifier);
         }
 
+        // 行与集合一起翻：集合是真相，行是投影，漏改任何一边都会在重建后暴露
+        _selected.Toggle(ids);
         PersistSelection();
         RefreshSelectionState();
 
@@ -1025,20 +1026,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearSelection()
     {
-        _suppressRowEvents = true;
-        try
+        foreach (var group in _groups)
         {
-            foreach (var group in _groups)
+            foreach (var row in group)
             {
-                foreach (var row in group)
-                {
-                    row.IsChecked = false;
-                }
+                row.IsChecked = false;
             }
-        }
-        finally
-        {
-            _suppressRowEvents = false;
         }
 
         _selected.Clear();

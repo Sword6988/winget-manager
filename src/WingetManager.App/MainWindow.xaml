@@ -64,12 +64,19 @@
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
+        <!--
+          勾选框刻意用 OneWay + Click，而不是 TwoWay：
+          1) CheckBox.IsChecked 是 bool?，TwoWay 绑定在列表虚拟化回收容器 / 重建集合时
+             可能把 false/null 回写到行对象，表现为「切换分组后勾选丢失」；
+          2) 用户意图由 Click 显式上报（OnRowCheckBoxClick），数据流单向、可追踪。
+        -->
         <CheckBox
             Grid.Column="0"
             MinWidth="0"
             VerticalAlignment="Center"
-            IsChecked="{x:Bind Row.IsChecked, Mode=TwoWay}"
-            IsEnabled="{x:Bind Row.IsSelectable}" />
+            IsChecked="{x:Bind Row.IsChecked, Mode=OneWay}"
+            IsEnabled="{x:Bind Row.IsSelectable}"
+            Click="OnRowCheckBoxClick" />
 
         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
           <TextBlock Text="{x:Bind Row.Name}" TextTrimming="CharacterEllipsis" />

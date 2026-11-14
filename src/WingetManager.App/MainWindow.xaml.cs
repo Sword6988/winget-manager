@@ -228,6 +228,30 @@ public sealed partial class MainWindow : Window, IMainView
         }
     }
 
+    // ───────────────────────────── 行勾选 ─────────────────────────────
+
+    /// <summary>
+    /// 行复选框点击：模板里是 OneWay 绑定（界面只读），用户意图在这里显式上报。
+    ///
+    /// 为什么不用 TwoWay：<c>CheckBox.IsChecked</c> 是 <c>bool?</c>，列表虚拟化会回收
+    /// 容器并在重建集合时重置容器状态，TwoWay 可能把非用户意图的 false/null 写回行对象，
+    /// 用户看到的就是「在一个分组勾好，切到另一个分组再切回来，勾选没了」。
+    /// </summary>
+    private void OnRowCheckBoxClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox checkBox || checkBox.DataContext is not PackageRowEntry entry)
+        {
+            return;
+        }
+
+        var wanted = checkBox.IsChecked == true;
+        if (!ViewModel.TrySetRowChecked(entry.Row, wanted))
+        {
+            // 不可勾选（或行已被重建）：把界面拉回数据，别让复选框停在错误状态
+            checkBox.IsChecked = entry.Row.IsChecked;
+        }
+    }
+
     // ───────────────────────────── 快捷键（P1-4） ─────────────────────────────
 
     private void OnFocusSearchAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)

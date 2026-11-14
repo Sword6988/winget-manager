@@ -10,19 +10,20 @@ namespace WingetManager.ViewModels;
 /// 行对象由 <see cref="MainViewModel.RebuildGroups"/> 整体重建，因此除
 /// <see cref="IsChecked"/> 之外的展示属性都是「构造后不变」的只读计算属性；
 /// 唯一会变的是勾选（用户点）与运行库改判（后台富化回来时整批重建）。
+///
+/// <see cref="IsChecked"/> 是<b>纯投影</b>：界面单向绑定（OneWay）它，用户点击由
+/// 视图代码显式调 <see cref="MainViewModel.TrySetRowChecked"/> 上报，行自己不做任何
+/// 回写。原因见该方法注释——TwoWay 绑定在虚拟化容器回收时可能误写 false，
+/// 表现为「切换分组后勾选丢失」。
 /// </summary>
 public sealed partial class PackageRow : ObservableObject
 {
-    private readonly Action<PackageRow, bool> _onCheckedChanged;
-
     /// <summary>创建行 VM。</summary>
     /// <param name="model">包模型（不做拷贝，改判直接改模型上的 IsDependency）。</param>
-    /// <param name="isChecked">初始勾选状态（从 selection.json 恢复）。</param>
-    /// <param name="onCheckedChanged">勾选变化回调（由 <see cref="MainViewModel"/> 落盘）。</param>
-    public PackageRow(Package model, bool isChecked, Action<PackageRow, bool> onCheckedChanged)
+    /// <param name="isChecked">初始勾选状态（来自勾选真相集合）。</param>
+    public PackageRow(Package model, bool isChecked)
     {
         Model = model ?? throw new ArgumentNullException(nameof(model));
-        _onCheckedChanged = onCheckedChanged ?? throw new ArgumentNullException(nameof(onCheckedChanged));
         _isChecked = isChecked;
     }
 
@@ -59,12 +60,9 @@ public sealed partial class PackageRow : ObservableObject
     /// <summary>不可勾选行的整体透明度（灰显但不隐藏，P0-7）。</summary>
     public double RowOpacity => Model.Reinstallable ? 1.0 : 0.45;
 
-    /// <summary>勾选状态（TwoWay 绑到 CheckBox）。</summary>
+    /// <summary>
+    /// 勾选状态（界面 OneWay 绑定到 CheckBox；写入只来自 <see cref="MainViewModel"/>）。
+    /// </summary>
     [ObservableProperty]
     private bool _isChecked;
-
-    partial void OnIsCheckedChanged(bool value)
-    {
-        _onCheckedChanged(this, value);
-    }
 }

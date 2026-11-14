@@ -18,6 +18,12 @@
 
     <!-- exe 文件图标（资源管理器 / 任务栏快捷方式读取 PE 资源里的这个 ico） -->
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+
+    <!-- 版本号：写入 PE 的 FileVersion/ProductVersion，与 App.xaml.cs 的 Version 常量
+         是同一语义的两个落点——改版本时两处一起改（前者给资源管理器看，后者进日志/标题）。 -->
+    <Version>3.0.1</Version>
+    <Product>Winget 软件管家</Product>
+    <AssemblyTitle>Winget 软件管家</AssemblyTitle>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
 

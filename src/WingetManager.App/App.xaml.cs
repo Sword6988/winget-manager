@@ -15,8 +15,11 @@ public partial class App : Application
     /// <summary>应用显示名（窗口标题 / 关于对话框单一来源）。</summary>
     public const string DisplayName = "Winget 软件管家";
 
-    /// <summary>版本号（与 exe 属性保持一致，P2-3）。</summary>
-    public const string Version = "3.0.0";
+    /// <summary>
+    /// 版本号（进日志 / 关于信息）。改版本时同步 <c>WingetManager.App.csproj</c> 的
+    /// <c>&lt;Version&gt;</c>——那个写进 PE 的 FileVersion，资源管理器里看到的是它。
+    /// </summary>
+    public const string Version = "3.0.1";
 
     private Window? _window;
 

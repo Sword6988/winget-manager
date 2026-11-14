@@ -515,3 +515,51 @@ start "" "%TARGET%\WingetManager.exe"
    publish 是覆盖式写入，且输出目录名本身就是 zip 顶层文件夹名，打包无需复制。
    代价是「上一版有、这一版已移除」的文件会残留，要彻底重建需手动删 `dist/.stage`。
 
+### 10.13 勾选丢失（v3.0.1）：切换分组后选择消失
+
+**现象**（用户报告）：「在某个页签选择之后，切换另一个页签，之前页签选择无法保存。」
+
+**根因**（代码级，可复现）：
+
+`MainViewModel.SetRowsChecked` 是「全选」「组头全选本组」的唯一落点，原实现是
+
+```csharp
+_suppressRowEvents = true;
+try { foreach (var row in rows) row.IsChecked = value; }   // 回调被抑制
+finally { _suppressRowEvents = false; }
+PersistSelection();   // 落盘的是仍未更新的 _selected
+```
+
+真相集合 `_selected` 只在行事件回调 `OnRowCheckedChanged` 里更新，而该回调被
+`_suppressRowEvents` 抑制，于是**集合从头到尾没被写入**。界面看着勾上了（行对象变了），
+但 `RebuildGroups` 重建行时按 `_selected.Contains()` 取初始状态——一切换分组，
+勾选全部变回未勾，且这份空集合随后被落盘覆盖。搜索框输入、后台富化改判触发重建时同样中招。
+
+**第二处隐患**：行模板用的是 `IsChecked="{x:Bind Row.IsChecked, Mode=TwoWay}"`，
+`CheckBox.IsChecked` 是 `bool?`，列表虚拟化会回收容器并在重建集合时重置容器状态，
+TwoWay 可能把非用户意图的 false/null 回写到行对象，形成同类「凭空取消勾选」。
+
+**修复**：
+
+| 层 | 改动 |
+|---|---|
+| Core | 新增 `SelectionBook`（勾选真相唯一持有者）：`SetMany` / `Toggle` / `PruneTo` 一次调用内完成集合变更并返回变更数，调用方没有「忘了同步」的余地；大小写不敏感、忽略空白 |
+| App | `SetRowsChecked` / `InvertSelection` / `ClearSelection` / `TrySetRowChecked` 一律「行投影 + 真相集合」同步提交；删掉 `PackageRow` 的回调与 `_suppressRowEvents`；`ApplySnapshot` 剪枝后立即刷新计数 |
+| XAML | 行复选框改 `Mode=OneWay` + `Click="OnRowCheckBoxClick"`，用户意图显式上报（`TrySetRowChecked`），数据流单向 |
+
+**验证（对照实验，同一份探针跑两个版本）**
+
+探针工程 `qa-selprobe`（工作区根目录，不进仓库）直接驱动真实 `MainViewModel`：
+造 8 个包（4 软件 / 2 运行库 / 2 winget 不支持）→ `ApplySnapshot` → 全选 / 组头全不选 /
+单行点击 / 反选 / 清空，每轮之间切分组触发全量重建，逐项比对真相集合、行投影与
+`selection.json`。不创建窗口，不干扰正在运行的实例。
+
+| 版本 | 结果 |
+|---|---|
+| 修复前（`git stash` 还原 App 层四处改动后重建） | **12 项 FAIL / 16 项断言**，首条即「全选写入真相集合 → 已选=0（期望 6）」、`selection.json=0`；「组头全不选」同样 0 变更 |
+| 修复后 | **19 项断言全 PASS**，含「切到软件/运行库/全部后已选保持」「重建后行投影与集合一致」「新实例从 selection.json 恢复」 |
+
+单元测试：新增 `SelectionBookTests` 15 例（批量/取反/剪枝/大小写/空值/往返），
+全量 **266 / 266 通过**（原 251）。
+
+**版本**：`App.Version` 3.0.0 → **3.0.1**（不改版本号的话新旧包同名，用户无法分辨手里是哪一版）。
