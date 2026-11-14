@@ -776,6 +776,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             // 一批一次重建、一次统计，绝不逐条刷新
             RebuildGroups();
+
+            // 分类变了，落盘快照也要跟着变：否则下次冷启动会先按旧分类渲染（包在「软件」组），
+            // 重扫完成后再跳到「运行库」，看起来像列表自己在动。
+            // 扫描/后台刷新期间不写——那会把即将被新快照覆盖的旧分类又写回去。
+            if (!IsScanning && !IsBackgroundRefreshing)
+            {
+                _catalog.PersistEnrichedSnapshot();
+            }
         });
     }
 

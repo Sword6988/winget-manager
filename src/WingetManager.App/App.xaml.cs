@@ -19,7 +19,7 @@ public partial class App : Application
     /// 版本号（进日志 / 关于信息）。改版本时同步 <c>WingetManager.App.csproj</c> 的
     /// <c>&lt;Version&gt;</c>——那个写进 PE 的 FileVersion，资源管理器里看到的是它。
     /// </summary>
-    public const string Version = "3.0.1";
+    public const string Version = "3.0.2";
 
     private Window? _window;
 

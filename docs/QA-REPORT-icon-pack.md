@@ -563,3 +563,52 @@ TwoWay 可能把非用户意图的 false/null 回写到行对象，形成同类�
 全量 **266 / 266 通过**（原 251）。
 
 **版本**：`App.Version` 3.0.0 → **3.0.1**（不改版本号的话新旧包同名，用户无法分辨手里是哪一版）。
+
+### 10.14 分组跳变（v3.0.2）：包先出现在「软件」，随后跳到「运行库」
+
+**现象**（用户报告）：「有两个运行库一开始是在软件页签下，后来跳到了运行库页签下，有一个延迟。」
+
+**不是错觉，是两轮分类**。分组只看 `Package.IsDependency` 一个布尔值，它分两轮产生：
+
+1. **扫描结束**：`CatalogService.IsDependencyByKeyword` 只用「包名 + 包 ID」匹配词表；
+2. **后台元数据核查**：对「可重装 ∧ 关键词判软件 ∧ 缓存未命中」的包逐个 `winget show`，
+   命中运行库信号即改判，按批（5 条）重建列表。
+
+**实测证据**（用户机器上运行的 3.0.1 实例，`data\logs\app.log`）：
+
+```
+10:32:23 [INFO] 后台元数据核查启动：56 个待查
+10:35:02 [INFO] 元数据核查结束：查 56，补漏 3，确认非运行库 53，失败 0，取消 False
+```
+
+被改判（`metadata-cache.json` 中 `dep: true`、且关键词初判为否）的三个包：
+
+| 包 ID | 名称 | 改判时刻 |
+|---|---|---|
+| `tschoonj.gtkforwindows` | GTK3-Runtime Win64 | 10:33:22 |
+| `microsoft.vstor` | Microsoft Visual Studio 2010 Tools for Office Runtime (x64) | 10:33:32 |
+| `openjs.nodejs` | Node.js | 10:33:39 |
+
+**两个根因**：
+
+| # | 问题 | 影响 |
+|---|---|---|
+| F8 | 关键词表里**没有裸 `runtime`**，只有 `windowsappruntime` / `desktopappruntime` 这类复合词 | 包名里明明写着 Runtime 的包（GTK3-Runtime、Tools for Office Runtime）首轮漏判，必然先落「软件」再跳「运行库」 |
+| F9 | 快照只在 `BuildSnapshotAsync` 结束时落盘，而那一刻只有关键词初判结果；富化改判只写 `metadata-cache.json`，**不回写快照** | 下次冷启动按旧分类渲染，重扫完成后再跳一次 → 同一个包每次启动都跳 |
+
+**修复**：
+
+| 层 | 改动 |
+|---|---|
+| Core | `DependencyKeywords` 补 `runtime`（同时删掉被它覆盖的 `windowsappruntime` / `desktopappruntime`），宽口径代价只是多打一个角标，远小于列表跳动的代价 |
+| Core | 新增 `CatalogService.PersistEnrichedSnapshot()`：按当前包状态重算 `Counts` 并原子回写快照；计数算法抽成 `CountOf()`，与扫描落盘共用一份，杜绝两处口径漂移 |
+| App | `OnMetadataChanges` 每批改判并重建后调用回写；**扫描/后台刷新期间跳过**（否则会把即将被新快照覆盖的旧分类又写回去） |
+
+**验证**：新增 5 例单测（`GTK3-Runtime Win64` / `Tools for Office Runtime` 关键词命中、`Node.js` 不被关键词误判、
+改判回写后磁盘快照的 `isDependency` 与 `counts.dependencies` 同步、无快照/无存储层时返回 false 不抛），
+全量 **271 / 271 通过**。
+
+**取舍**：`Node.js` 仍会被元数据判入「运行库」（其描述自称 JavaScript runtime）。这属产品口径而非 bug，
+本版不动；若要把它留在「软件」，应在元数据信号层加白名单，而不是在关键词层做例外。
+
+**版本**：`App.Version` 3.0.1 → **3.0.2**。

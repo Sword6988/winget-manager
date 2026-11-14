@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using WingetManager.Infra;
 using WingetManager.Models;
+using WingetManager.Persistence;
 using WingetManager.Services;
 using Xunit;
 
@@ -82,10 +83,12 @@ public sealed class CatalogServiceTests
         => string.Join("\n", new[] { ListHeader }.Concat(rows)) + "\n";
 
     private static CatalogService CreateService(string listStdout, RuntimeCache? cache = null,
-                                                FakeRepository? repository = null)
+                                                FakeRepository? repository = null,
+                                                CatalogSnapshotStore? snapshotStore = null)
     {
         var repo = repository ?? new FakeRepository(listStdout);
-        return new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, cache, TempLog());
+        return new CatalogService(AppConfig.CreateForTests("fake-winget.exe", 60, 30), repo, cache,
+                                  TempLog(), snapshotStore);
     }
 
     /// <summary>临时日志：扫描用例会打「目录刷新完成」INFO，注入独立文件避免写进真实 app.log。</summary>
@@ -151,6 +154,12 @@ public sealed class CatalogServiceTests
     [InlineData("UI.Xaml", "Microsoft.UI.Xaml.2.8", true)]
     [InlineData("Windows App Runtime", "Microsoft.WindowsAppRuntime.1.7", true)]
     [InlineData("Microsoft Edge WebView2 Runtime", "Microsoft.EdgeWebView2Runtime", true)]
+    // 词表补 runtime 之后：包名里写着 Runtime、ID 里却没有复合词的两个真实案例
+    // （这两个包曾因漏判先落进「软件」组，等后台核查回来再跳到「运行库」）
+    [InlineData("GTK3-Runtime Win64", "tschoonj.gtkforwindows", true)]
+    [InlineData("Microsoft Visual Studio 2010 Tools for Office Runtime (x64)", "microsoft.vstor", true)]
+    // 反例：名字里没有 runtime 的包不能被关键词误判，只能靠元数据改判
+    [InlineData("Node.js", "openjs.nodejs", false)]
     [InlineData("Google Chrome", "Google.Chrome", false)]
     [InlineData("7-Zip", "7zip.7zip", false)]
     public void IsDependencyByKeyword_MatchesNameOrId(string name, string packageId, bool expected)
@@ -383,5 +392,50 @@ public sealed class CatalogServiceTests
         var snapshot = await CreateService(stdout).BuildSnapshotAsync(CancellationToken.None);
 
         Assert.Equal("Vendor.Anonymous", Assert.Single(snapshot.Packages).Name);
+    }
+
+    // ── 改判回写 ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task PersistEnrichedSnapshot_WritesPromotedClassificationAndCounts()
+    {
+        var store = new CatalogSnapshotStore(TempFile("catalog-cache.json"), TempLog());
+        var stdout = BuildList(
+            ListRow("Git", "Git.Git"),
+            ListRow("Node.js", "openjs.nodejs"));
+        var service = CreateService(stdout, snapshotStore: store);
+
+        var snapshot = await service.GetCatalogAsync(force: true, CancellationToken.None);
+        // 关键词初判：两个都是普通软件
+        Assert.Equal(0, snapshot.Counts.Dependencies);
+        Assert.Equal(0, store.Load()!.Counts.Dependencies);
+
+        // 模拟后台 winget show 把 Node.js 改判成运行库（描述里写着 JavaScript runtime）
+        var node = snapshot.Packages.First(p => p.PackageIdentifier == "openjs.nodejs");
+        node.IsDependency = true;
+
+        Assert.True(service.PersistEnrichedSnapshot());
+
+        var reloaded = store.Load();
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded!.Packages.First(p => p.PackageIdentifier == "openjs.nodejs").IsDependency);
+        // 计数必须跟着改判走，否则缓存里的「运行库 N 个」与界面差着改判数量
+        Assert.Equal(1, reloaded.Counts.Dependencies);
+        Assert.Equal(2, reloaded.Counts.Total);
+        Assert.Equal(2, reloaded.Counts.Reinstallable);
+    }
+
+    [Fact]
+    public async Task PersistEnrichedSnapshot_WithoutSnapshotOrStoreReturnsFalse()
+    {
+        // 没扫过（内存里还没有快照）→ 不写、不抛
+        var noSnapshot = CreateService(BuildList(ListRow("Git", "Git.Git")),
+                                       snapshotStore: new CatalogSnapshotStore(TempFile("x.json"), TempLog()));
+        Assert.False(noSnapshot.PersistEnrichedSnapshot());
+
+        // 扫过但没配存储层（等价关闭落盘）→ 同样返回 false
+        var noStore = CreateService(BuildList(ListRow("Git", "Git.Git")));
+        await noStore.GetCatalogAsync(force: true, CancellationToken.None);
+        Assert.False(noStore.PersistEnrichedSnapshot());
     }
 }

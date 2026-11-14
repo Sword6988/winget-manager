@@ -29,12 +29,21 @@ public sealed class CatalogService
     /// <summary>
     /// 运行库/系统组件关键词表：只做初判（给列表行打「运行库」角标、给统计卡计数），
     /// 之后由 <c>winget show</c> 元数据核查补漏。
+    ///
+    /// <para>
+    /// <c>runtime</c> 是刻意保留的宽口径词：<c>GTK3-Runtime Win64</c>、
+    /// <c>Microsoft Visual Studio 2010 Tools for Office Runtime</c> 这类包名里就写着
+    /// Runtime，此前因为词表里只有 <c>windowsappruntime</c>/<c>desktopappruntime</c> 这种
+    /// 复合词而漏判——它们会先落进「软件」组，等后台核查回来再跳到「运行库」，
+    /// 用户看到的就是「包自己换了页签」。宽口径词的误判代价只是多打一个角标，
+    /// 比列表跳动的代价小得多。
+    /// </para>
     /// </summary>
     public static readonly IReadOnlyList<string> DependencyKeywords = new[]
     {
-        "vcredist", "visualc++", "redistributable", "dotnet", "windowsappruntime", "vclibs",
+        "vcredist", "visualc++", "redistributable", "runtime", "dotnet", "vclibs",
         "ui.xaml", "appinstaller", "directx", "webview2", ".net framework", "net framework",
-        "net.native", "desktopappruntime", "xna",
+        "net.native", "xna",
     };
 
     private readonly AppConfig _config;
@@ -183,13 +192,7 @@ public sealed class CatalogService
         stopwatch.Stop();
         var durationMs = (int)stopwatch.ElapsedMilliseconds;
 
-        var counts = new CatalogCounts
-        {
-            Total = packages.Count,
-            Reinstallable = packages.Count(p => p.Reinstallable),
-            Unsupported = packages.Count(p => !p.Reinstallable),
-            Dependencies = packages.Count(p => p.IsDependency),
-        };
+        var counts = CountOf(packages);
 
         var snapshot = new CatalogSnapshot
         {
@@ -203,6 +206,52 @@ public sealed class CatalogService
 
         _log.Info("目录刷新完成: {0} 项（可重装 {1}）{2}ms", counts.Total, counts.Reinstallable, durationMs);
         return snapshot;
+    }
+
+    /// <summary>
+    /// 按包序列重算四个统计口径（扫描落盘、改判回写共用同一份算法，避免两处口径漂移）。
+    /// </summary>
+    /// <param name="packages">包序列。</param>
+    /// <returns>统计计数。</returns>
+    private static CatalogCounts CountOf(IReadOnlyList<Package> packages) => new()
+    {
+        Total = packages.Count,
+        Reinstallable = packages.Count(p => p.Reinstallable),
+        Unsupported = packages.Count(p => !p.Reinstallable),
+        Dependencies = packages.Count(p => p.IsDependency),
+    };
+
+    /// <summary>
+    /// 富化改判后回写落盘快照（把「运行库」归属与重算后的计数一起写回）。
+    ///
+    /// <para>
+    /// 为什么需要这个入口：快照在 <see cref="BuildSnapshotAsync"/> 结束时落盘，那一刻只有
+    /// 关键词初判的结果；后台 <c>winget show</c> 把包改判成运行库之后如果不同步回写，
+    /// 下次冷启动会先把它们渲染进旧分组，等重扫完成再跳一次——用户视角就是「包自己换页签」。
+    /// </para>
+    /// <para>
+    /// 包实例与界面共享引用（改判直接写在 <see cref="Package"/> 上），所以这里只需要补计数，
+    /// 不重建列表。写盘由 <see cref="CatalogSnapshotStore"/> 走原子替换，失败只记 WARN。
+    /// </para>
+    /// </summary>
+    /// <returns><see langword="true"/> = 已交给存储层落盘；<see langword="false"/> = 没有快照或没配存储。</returns>
+    public bool PersistEnrichedSnapshot()
+    {
+        CatalogSnapshot? snapshot;
+        lock (_gate)
+        {
+            snapshot = _snapshot;
+        }
+
+        if (snapshot is null || _snapshotStore is null)
+        {
+            return false;
+        }
+
+        snapshot.Counts = CountOf(snapshot.Packages);
+        _snapshotStore.Save(snapshot);
+        _log.Info("目录快照按改判结果回写：运行库 {0} 个", snapshot.Counts.Dependencies);
+        return true;
     }
 
     /// <summary>
