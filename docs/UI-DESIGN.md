@@ -5,7 +5,7 @@
 
 > 适用版本：WingetManagerWpf v2.18.0（WPF 重制版）
 > 生效范围：`Theme/Tokens.xaml`（全量）、`Theme/Styles.xaml`、`MainWindow`、`PackageRowControl`、`app.ico`
-> 兼容性：所有旧令牌键名保留，未引用任何新第三方库；`tests/SelfTest` 432 项断言全部通过
+> 兼容性：所有旧令牌键名保留，未引用任何新第三方库；`tests/SelfTest` 445 项断言全部通过
 
 ---
 
@@ -113,4 +113,4 @@ Azure 蓝 `#2563EB` 对比度 5.2:1，既能当品牌色也能当可读文字色
 | `tools/make_icon.py` + `Assets/app.ico` | 图标渐变同步新品牌色并重新生成 |
 | `.workbuddy/checks/check_csproj.py` | 字号契约表更新为 v2 值 |
 
-验证：`check_csproj.py` 与 `qa_verify.py` 静态检查 PASS（仅 2 条预期 MINOR：紧凑边距令牌由运行时赋值，静态扫描不可见）；MSBuild 编译 0 error；`tests/SelfTest` 432 项断言全部通过。
+验证：`check_csproj.py` 与 `qa_verify.py` 静态检查 PASS（仅 2 条预期 MINOR：紧凑边距令牌由运行时赋值，静态扫描不可见）；MSBuild 编译 0 error；`tests/SelfTest` 445 项断言全部通过。

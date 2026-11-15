@@ -980,12 +980,15 @@ namespace WingetManagerWpf.Views
                 // 无边框窗口最大化后，系统仍按 ResizeBorderThickness 把窗口撑大，
                 // 四边会各溢出 7px（内容被裁掉）。用等量 Margin 收回来。
                 RootGrid.Margin = new Thickness(Metrics.ResizeEdge);
-                MaximizeButton.Content = "❐";
+                // 字形用矢量 DataTemplate 切换（□/❐ 字符大小粗细随字体漂移，已弃用）
+                MaximizeButton.ContentTemplate = (DataTemplate)FindResource("Glyph.Window.Restore");
+                MaximizeButton.ToolTip = "还原";
             }
             else
             {
                 RootGrid.Margin = new Thickness(0);
-                MaximizeButton.Content = "□";
+                MaximizeButton.ContentTemplate = (DataTemplate)FindResource("Glyph.Window.Maximize");
+                MaximizeButton.ToolTip = "最大化";
             }
 
             _stickyDirty = true;

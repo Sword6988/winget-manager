@@ -407,15 +407,98 @@
     </Style>
 
     <!-- ══════════════════ 标题栏窗口按钮（ⓘ — □ ✕） ══════════════════ -->
-    <!-- 30×28、hover 圆角 7：Windows 自己的标题按钮是直角，但我们整窗都是圆角卡片，
+    <!-- 34×30、hover 圆角 8：Windows 自己的标题按钮是直角，但我们整窗都是圆角卡片，
          直角按钮会显得像贴上去的，故统一给圆角 -->
+    <!-- ══════════════════ 标题栏窗口字形（矢量版） ══════════════════ -->
+    <!-- 为什么不用字体字符（ⓘ ─ □ ✕ ❐）：
+         ① 不同字体里这五个字符的大小、粗细、基线参差，换一台机器 / 回退到别的字体
+            观感就变，永远谈不上「精致」；
+         ② ❐ 是生僻字形，常见字体里缺字或形态很怪；
+         ③ 字符渲染走文本管线，小字号 + 抗锯齿容易发虚。
+         矢量描边则线宽、圆角、光学居中完全可控，任意 DPI 下都锐利。
+         描边色绑定到宿主 Button 的 Foreground —— hover / pressed 触发器改
+         Foreground 就能联动换色，不需要每个字形自己写触发器。
+         统一规格：12×12 画布、1.2 描边、圆角线帽/拐角。 -->
+    <DataTemplate x:Key="Glyph.Window.Info">
+        <Viewbox Width="12" Height="12">
+            <Canvas Width="12" Height="12">
+                <Ellipse Canvas.Left="1.8"
+                         Canvas.Top="1.8"
+                         Width="8.4"
+                         Height="8.4"
+                         Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                         StrokeThickness="1.2" />
+                <Ellipse Canvas.Left="5.4"
+                         Canvas.Top="3.4"
+                         Width="1.2"
+                         Height="1.2"
+                         Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                <Path Data="M6,5.8 V8.4"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.2"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round" />
+            </Canvas>
+        </Viewbox>
+    </DataTemplate>
+
+    <DataTemplate x:Key="Glyph.Window.Minimize">
+        <Viewbox Width="12" Height="12">
+            <Canvas Width="12" Height="12">
+                <Path Data="M2.8,6 H9.2"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.2"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round" />
+            </Canvas>
+        </Viewbox>
+    </DataTemplate>
+
+    <DataTemplate x:Key="Glyph.Window.Maximize">
+        <Viewbox Width="12" Height="12">
+            <Canvas Width="12" Height="12">
+                <Path Data="M4,2.9 H8 A1.1,1.1 0 0 1 9.1,4 V8 A1.1,1.1 0 0 1 8,9.1 H4 A1.1,1.1 0 0 1 2.9,8 V4 A1.1,1.1 0 0 1 4,2.9 Z"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.2"
+                      StrokeLineJoin="Round" />
+            </Canvas>
+        </Viewbox>
+    </DataTemplate>
+
+    <!-- 还原态：前小圆角方 + 右上残边（前方面板盖住后方左下，只画可见部分） -->
+    <DataTemplate x:Key="Glyph.Window.Restore">
+        <Viewbox Width="12" Height="12">
+            <Canvas Width="12" Height="12">
+                <Path Data="M5.1,2.9 H8 A1.1,1.1 0 0 1 9.1,4 V6.9"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.2"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round" />
+                <Path Data="M4,5.4 H6.9 A1.1,1.1 0 0 1 8,6.5 V9.4 A1.1,1.1 0 0 1 6.9,10.5 H4 A1.1,1.1 0 0 1 2.9,9.4 V6.5 A1.1,1.1 0 0 1 4,5.4 Z"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.2"
+                      StrokeLineJoin="Round" />
+            </Canvas>
+        </Viewbox>
+    </DataTemplate>
+
+    <DataTemplate x:Key="Glyph.Window.Close">
+        <Viewbox Width="12" Height="12">
+            <Canvas Width="12" Height="12">
+                <Path Data="M3.6,3.6 L8.4,8.4 M8.4,3.6 L3.6,8.4"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.25"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round" />
+            </Canvas>
+        </Viewbox>
+    </DataTemplate>
+
     <Style x:Key="Button.WindowButton" TargetType="Button">
-        <Setter Property="Width" Value="30" />
-        <Setter Property="Height" Value="28" />
+        <Setter Property="Width" Value="34" />
+        <Setter Property="Height" Value="30" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
-        <Setter Property="FontFamily" Value="{StaticResource FontFamily.Ui}" />
-        <Setter Property="FontSize" Value="{StaticResource FontSize.Aux}" />
         <Setter Property="Foreground" Value="{StaticResource Brush.Muted}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Padding" Value="0" />

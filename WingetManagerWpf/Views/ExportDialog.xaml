@@ -62,7 +62,7 @@
                         Margin="0,0,8,0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
-                        Content="✕"
+                        ContentTemplate="{StaticResource Glyph.Window.Close}"
                         Style="{StaticResource Button.WindowButton}" />
             </Grid>
 

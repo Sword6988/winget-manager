@@ -119,14 +119,24 @@
                 </StackPanel>
             </StackPanel>
 
-            <StackPanel Margin="0,0,10,0"
+            <!-- 窗口按钮：字形走矢量 DataTemplate（见 Styles.xaml「标题栏窗口字形」），
+                 不再用字体字符 —— 那五个字符的大小粗细随字体漂移，且 ❐ 常缺字。
+                 彼此留 2px 缝，hover 圆角背景不会粘连成一条。 -->
+            <StackPanel Margin="0,0,8,0"
                         HorizontalAlignment="Right"
                         Orientation="Horizontal"
                         VerticalAlignment="Center">
-                <Button x:Name="AboutButton" Content="ⓘ" Style="{StaticResource Button.WindowButton}" />
-                <Button x:Name="MinimizeButton" Content="─" Style="{StaticResource Button.WindowButton}" />
-                <Button x:Name="MaximizeButton" Content="□" Style="{StaticResource Button.WindowButton}" />
-                <Button x:Name="CloseWindowButton" Content="✕" Style="{StaticResource Button.WindowClose}" />
+                <Button x:Name="AboutButton" ContentTemplate="{StaticResource Glyph.Window.Info}"
+                        Style="{StaticResource Button.WindowButton}" />
+                <Button x:Name="MinimizeButton" Margin="2,0,0,0"
+                        ContentTemplate="{StaticResource Glyph.Window.Minimize}"
+                        Style="{StaticResource Button.WindowButton}" />
+                <Button x:Name="MaximizeButton" Margin="2,0,0,0"
+                        ContentTemplate="{StaticResource Glyph.Window.Maximize}"
+                        Style="{StaticResource Button.WindowButton}" />
+                <Button x:Name="CloseWindowButton" Margin="2,0,0,0"
+                        ContentTemplate="{StaticResource Glyph.Window.Close}"
+                        Style="{StaticResource Button.WindowClose}" />
             </StackPanel>
 
             <Border Height="1"
@@ -172,8 +182,7 @@
                             Margin="0,0,7,0"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Center"
-                            Content="✕"
-                            FontSize="{StaticResource FontSize.Chip}"
+                            ContentTemplate="{StaticResource Glyph.Window.Close}"
                             Visibility="Collapsed"
                             Style="{StaticResource Button.WindowButton}" />
                 </Grid>

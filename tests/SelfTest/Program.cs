@@ -102,6 +102,7 @@ namespace WingetManagerWpf.SelfTest
             RunCase("T38 JSON 嵌套深度上限：超深文件抛可捕获异常而不是 StackOverflow（审计修复）", CaseJsonDepthLimit);
             RunCase("T39 解码兜底识别 U+FFFD 乱码，GBK 兜底不会被静默跳过（审计修复）", CaseDecodeReplacementGuard);
             RunCase("T40 打包脚本只替换 exe，不删除 dist\\Data 便携数据（审计修复）", CaseBuildScriptKeepsData);
+            RunCase("T41 窗口按钮字形已矢量化：不再依赖字体字符，最大化/还原走 DataTemplate 切换", CaseWindowGlyphsVectorized);
 
             Console.WriteLine(new string('=', 64));
             Console.WriteLine("总计: " + (_passed + _failed) + " 项断言, 通过 " + _passed + ", 失败 " + _failed);
@@ -1708,6 +1709,89 @@ namespace WingetManagerWpf.SelfTest
                  "只删除旧的 exe");
             True(text.IndexOf("\"%DIST%\\*.pdb\"", StringComparison.OrdinalIgnoreCase) >= 0,
                  "顺手清理旧 pdb 残留");
+        }
+
+        /// <summary>
+        /// T41：窗口按钮字形必须保持矢量（DataTemplate），不许回退到字体字符。
+        /// <para>
+        /// ⓘ ─ □ ✕ ❐ 这类字符在字体里大小、粗细、基线参差，❐ 还常缺字；
+        /// 矢量描边才谈得上「精致」。本用例锁三件事：
+        /// ① Styles.xaml 定义了全部五个字形资源；
+        /// ② 主窗口与三个对话框的按钮全部改用 ContentTemplate，XAML 里不再出现
+        ///    <c>Content="□"</c> 这类字体字符写法；
+        /// ③ 最大化/还原图标的切换走 FindResource("Glyph.Window.Restore"/"...Maximize")。
+        /// </para>
+        /// </summary>
+        private static void CaseWindowGlyphsVectorized()
+        {
+            string root = FindRepoRoot();
+            True(root != null, "定位到仓库根");
+            if (root == null)
+            {
+                return;
+            }
+
+            string styles = File.ReadAllText(Path.Combine(root,
+                "WingetManagerWpf", "Theme", "Styles.xaml"), Encoding.UTF8);
+            foreach (string glyph in new[]
+                     {
+                         "Glyph.Window.Info", "Glyph.Window.Minimize", "Glyph.Window.Maximize",
+                         "Glyph.Window.Restore", "Glyph.Window.Close"
+                     })
+            {
+                True(styles.IndexOf("x:Key=\"" + glyph + "\"", StringComparison.Ordinal) >= 0,
+                     "Styles.xaml 定义了 " + glyph);
+            }
+
+            string main = File.ReadAllText(Path.Combine(root,
+                "WingetManagerWpf", "Views", "MainWindow.xaml"), Encoding.UTF8);
+            True(main.IndexOf("Glyph.Window.Maximize", StringComparison.Ordinal) >= 0
+                 && main.IndexOf("Glyph.Window.Close", StringComparison.Ordinal) >= 0,
+                 "MainWindow.xaml 四个窗口按钮全部用矢量字形");
+            True(main.IndexOf("Content=\"\u25A1\"", StringComparison.Ordinal) < 0
+                 && main.IndexOf("Content=\"\u2715\"", StringComparison.Ordinal) < 0
+                 && main.IndexOf("Content=\"\u24D8\"", StringComparison.Ordinal) < 0,
+                 "MainWindow.xaml 不再用字体字符当窗口按钮（□ ✕ ⓘ）");
+
+            string code = File.ReadAllText(Path.Combine(root,
+                "WingetManagerWpf", "Views", "MainWindow.xaml.cs"), Encoding.UTF8);
+            True(code.IndexOf("Glyph.Window.Restore", StringComparison.Ordinal) >= 0
+                 && code.IndexOf("Glyph.Window.Maximize", StringComparison.Ordinal) >= 0,
+                 "最大化/还原图标切换走矢量 DataTemplate（不再赋字符常量）");
+            True(code.IndexOf("Content = \"\u2750\"", StringComparison.Ordinal) < 0,
+                 "不再给 MaximizeButton 赋 ❐ 字符");
+
+            foreach (string dialog in new[] { "AboutDialog.xaml", "ExportDialog.xaml", "WingetGuideDialog.xaml" })
+            {
+                string text = File.ReadAllText(Path.Combine(root, "WingetManagerWpf", "Views", dialog),
+                    Encoding.UTF8);
+                True(text.IndexOf("Glyph.Window.Close", StringComparison.Ordinal) >= 0,
+                     dialog + " 的关闭按钮用矢量字形");
+            }
+        }
+
+        /// <summary>从测试程序所在目录向上找仓库根（以 WingetManagerWpf.sln 为标记，最多 6 层）。</summary>
+        private static string FindRepoRoot()
+        {
+            try
+            {
+                var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+                for (int i = 0; i < 6 && dir != null; i++)
+                {
+                    if (File.Exists(Path.Combine(dir.FullName, "WingetManagerWpf.sln")))
+                    {
+                        return dir.FullName;
+                    }
+
+                    dir = dir.Parent;
+                }
+            }
+            catch (Exception)
+            {
+                // 定位失败按「找不到」处理，由断言给出结论
+            }
+
+            return null;
         }
 
         /// <summary>从测试程序所在目录向上找仓库根里的文件（最多 6 层）。</summary>
