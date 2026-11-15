@@ -11,8 +11,9 @@
 - 版本：2.18.1（基线对齐原版 `core/version.py` 的 2.18.0，此后 WPF 侧的界面修订在此独立递增）
 - 界面语言：中文
 - 零 NuGet 依赖：只用 .NET Framework 4.8 自带程序集
-- 不想自己编译？直接下 exe：[**v2.18.0-wpf 发布页**](https://github.com/Sword6988/winget-manager/releases/tag/v2.18.0-wpf)
-  （`WingetManager-2.18.0-wpf.exe` + `SHA256SUMS.txt`，由 GitHub Actions 构建并上传）
+- 不想自己编译？直接下 exe：[**WPF 版发布页**](https://github.com/Sword6988/winget-manager/releases?q=wpf)
+  （`WingetManager-<版本>-wpf.exe` + `SHA256SUMS.txt`，由 GitHub Actions 构建并上传）。
+  这里刻意不写死某个版本号——链接指向按 `wpf` 筛选的发布列表，永远显示最新一版，不会随发版失效。
 
 ---
 
