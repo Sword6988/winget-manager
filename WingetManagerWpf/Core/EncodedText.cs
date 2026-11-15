@@ -7,9 +7,18 @@ namespace WingetManagerWpf.Core
     /// <summary>
     /// 编码与「显示宽度」工具。
     /// <para>
-    /// 解码顺序 <c>utf-8-sig → utf-8（严格）→ 本地编码(936) → UTF-8 替换</c> 不能换：
+    /// 解码顺序 <c>utf-8-sig → utf-8（严格）→ GBK（严格，视 ANSI 代码页而定）→
+    /// 本地 ANSI → GBK（宽容）→ UTF-8 替换</c> 不能换：
     /// BOM 必须先剥，否则第一行表头会变成 "\uFEFF名称"，表头标签匹配全失败；
     /// 严格 UTF-8 必须先于 GBK，否则 UTF-8 的字节流会被 936 解成乱码而不报错。
+    /// </para>
+    /// <para>
+    /// 为什么 GBK 有时要抢在 ANSI 前面：<c>Encoding.Default</c> 是「非 Unicode 程序的语言」
+    /// 决定的 ANSI 代码页，中文 Windows 上是 936，但英文/西文 Windows 上是 1252 —— 而
+    /// **单字节代码页永远不可能产出 U+FFFD**，它会把任何字节都映射成某个拉丁字符。
+    /// 于是 GBK 的中文输出被解成 "ÔËÐÐ¿â" 这种看着「成功」的乱码，且没有任何异常可抓。
+    /// 这类代码页（<see cref="Encoding.IsSingleByte"/>）与 UTF-8 页面（65001，见下）
+    /// 根本装不下汉字，此时先试严格 GBK 只会更好，不会更差。
     /// </para>
     /// <para>
     /// 显示宽度是 <c>winget list</c> 切列的基础：汉字/全角占 2 列、组合字符占 0 列、
@@ -22,6 +31,7 @@ namespace WingetManagerWpf.Core
         private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
         private static readonly Encoding LenientUtf8 = new UTF8Encoding(false, false);
         private static readonly Encoding Gbk;
+        private static readonly Encoding StrictGbk;
 
         static EncodedText()
         {
@@ -29,19 +39,40 @@ namespace WingetManagerWpf.Core
             {
                 // 936 = GBK。Windows 上一定有；万一取不到就留 null，解码时跳过这一档
                 Gbk = Encoding.GetEncoding(936);
+
+                // 严格版：遇到非法字节序列直接抛，而不是悄悄换成 U+FFFD。
+                // 只有「会抛」才能区分「这段字节本来就不是 GBK」与「解出来了但有损」，
+                // 否则无从判断该不该把解码权交回给 ANSI 代码页。
+                StrictGbk = Encoding.GetEncoding(
+                    936, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
             }
             catch (Exception)
             {
                 Gbk = null;
+                StrictGbk = null;
             }
         }
 
         /// <summary>把子进程的原始字节解成文本（见类注释里的顺序说明）。</summary>
         public static string Decode(byte[] raw)
         {
+            return Decode(raw, Encoding.Default);
+        }
+
+        /// <summary>
+        /// 同上，但显式指定「本机 ANSI 代码页」。存在的唯一目的是让自测能在中文机器上
+        /// 复现 1252 机器才会走到的分支 —— 否则那条路径只有在英文 Windows / CI 上才暴露。
+        /// </summary>
+        public static string Decode(byte[] raw, Encoding ansi)
+        {
             if (raw == null || raw.Length == 0)
             {
                 return string.Empty;
+            }
+
+            if (ansi == null)
+            {
+                ansi = Encoding.Default;
             }
 
             int offset = 0;
@@ -62,7 +93,22 @@ namespace WingetManagerWpf.Core
 
             string text;
 
-            // ② 本机首选 ANSI 代码页（中文 Windows 即 936）
+            // ② ANSI 代码页装不下汉字时（单字节页 1252/437/850… 或 UTF-8 页 65001），
+            //    先把严格 GBK 试掉。这一步必须在 ③ 之前，否则 ③ 会用一个「解得出字符
+            //    但全是乱码」的结果提前 return（单字节页不产 U+FFFD，守卫拦不住）。
+            if (StrictGbk != null && AnsiCannotCarryChinese(ansi))
+            {
+                try
+                {
+                    return StrictGbk.GetString(raw);
+                }
+                catch (DecoderFallbackException)
+                {
+                    // 确实不是 GBK（例如 cp1252 的 "café"），交给 ③
+                }
+            }
+
+            // ③ 本机首选 ANSI 代码页（中文 Windows 即 936）
             //    坑：系统若开了「Beta: 使用 UTF-8 提供全球语言支持」，默认代码页就是 65001，
             //    此时 GetString **不会抛异常**，只会把 GBK 字节解成一串 U+FFFD（替换字符）。
             //    这种「静默乱码」比异常更糟 —— 它会提前 return，把下面真正的 GBK 兜底整段跳过，
@@ -70,7 +116,7 @@ namespace WingetManagerWpf.Core
             //    解出乱码就当作这一档失败，继续往下走。
             try
             {
-                text = Encoding.Default.GetString(raw);
+                text = ansi.GetString(raw);
                 if (!string.IsNullOrEmpty(text) && !ContainsReplacementChar(text))
                 {
                     return text;
@@ -81,7 +127,7 @@ namespace WingetManagerWpf.Core
                 // 忽略，继续下一档
             }
 
-            // ③ 显式 GBK（某些系统的默认代码页被改成 65001 时兜底）
+            // ④ 宽容 GBK（某些系统的默认代码页被改成 65001、且 ② 因故没跑时的兜底）
             if (Gbk != null)
             {
                 try
@@ -94,9 +140,20 @@ namespace WingetManagerWpf.Core
                 }
             }
 
-            // ④ 最后容错：UTF-8 + 替换字符（信息有损，但界面能继续跑）
+            // ⑤ 最后容错：UTF-8 + 替换字符（信息有损，但界面能继续跑）
             return LenientUtf8.GetString(raw, offset, raw.Length - offset);
         }
+
+        /// <summary>
+        /// 该 ANSI 代码页是否能表示汉字。单字节页（1252/437/850…）与 UTF-8 页（65001）
+        /// 一律不能 —— 前者没有汉字码位，后者拿到的是「已确认不是合法 UTF-8」的字节。
+        /// 932/936/949/950/54936 这类双字节页保持原有顺序，不改变既有行为。
+        /// </summary>
+        private static bool AnsiCannotCarryChinese(Encoding ansi)
+        {
+            return ansi.IsSingleByte || ansi.CodePage == 65001;
+        }
+
 
         /// <summary>
         /// 文本里是否含 Unicode 替换字符（U+FFFD）。有就说明这一档解码已经失真 ——

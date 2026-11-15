@@ -47,7 +47,7 @@ build-release.bat
 
 > 这条离线路径不是理论方案：本工程最后一次构建就是用它产出的
 > `dist\WingetManager.exe`（约 330 KB，0 error / 0 warning），并用同一套工具链编译并跑通了
-> `tests/SelfTest`（427 项断言全通过）。
+> `tests/SelfTest`（432 项断言全通过）。
 
 > **手上没有 Windows 机器？** 推到 GitHub 后跑 `.github/workflows/build.yml`（已随仓库提供），
 > 在 Actions 的 Artifacts 里直接下载 `WingetManager-singlefile`。
@@ -71,7 +71,7 @@ msbuild WingetManagerWpf.sln /p:Configuration=Release /m
 用的 `FormattedText` 旧构造重载会在高 DPI 下按 1.0 量字（字被裁），已统一改为带 `PixelsPerDip`
 的重载（`CS0618` 一并消失）。
 
-**自测**（逻辑层 427 项断言，不需要 UI）：
+**自测**（逻辑层 432 项断言，不需要 UI）：
 
 ```bat
 tests\SelfTest\build-and-run.bat

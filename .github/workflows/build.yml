@@ -18,8 +18,9 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # 先跑逻辑层自测：427 条断言，退出码非 0 直接让工作流红掉，
-      # 避免带着回归产出 exe。
+      # 先跑逻辑层自测：432 条断言，退出码非 0 直接让工作流红掉，
+      # 避免带着回归产出 exe。注意 windows-latest 是 en-US 系统
+      # （ANSI = 1252），凡是依赖区域设置的解码分支只有在这里才测得到。
       - name: Run self-test
         shell: cmd
         run: tests\SelfTest\build-and-run.bat

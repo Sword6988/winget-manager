@@ -1632,11 +1632,18 @@ namespace WingetManagerWpf.SelfTest
         }
 
         /// <summary>
-        /// 本轮审计修复：解码兜底必须能识别「解出来全是 U+FFFD」。
+        /// 本轮审计修复：解码兜底必须能识别「解出来全是 U+FFFD」，也要能对付
+        /// 「解出来全是拉丁乱码」——后者连 U+FFFD 都不给你。
         /// <para>
         /// 机器开了「Beta: 使用 UTF-8 提供全球语言支持」时，默认代码页是 65001，
         /// <c>Encoding.Default.GetString</c> 会把 GBK 字节解成一串替换字符且**不抛异常**；
         /// 旧实现看到「非空字符串」就 return，GBK 兜底永远轮不到，界面上就是一片「口口口」。
+        /// </para>
+        /// <para>
+        /// 更隐蔽的一种：英文 / 西文 Windows 的 ANSI 是 1252，单字节，**任何字节都能映射成
+        /// 某个拉丁字符**，所以连 U+FFFD 都没有 —— GBK 中文变成 "ÔËÐÐ¿â"，看着完全正常。
+        /// 这条路径在中文机器上永远走不到，是 GitHub Actions（windows-latest，en-US）
+        /// 替我们发现的，见 §10.4。
         /// </para>
         /// </summary>
         private static void CaseDecodeReplacementGuard()
@@ -1650,6 +1657,27 @@ namespace WingetManagerWpf.SelfTest
             string decoded = EncodedText.Decode(gbk);
             Equal("运行库 中文测试", decoded, "GBK 字节解码结果正确");
             True(!EncodedText.ContainsReplacementChar(decoded), "GBK 解码结果不含替换字符");
+
+            // ── 下面四条是 CI（英文 Windows，ANSI = 1252）暴露出来的缺陷回归锁 ──
+            // 单字节代码页（1252/437/850…）**永远不产 U+FFFD**，会把 GBK 字节安静地解成
+            // "ÔËÐÐ¿â" 这种看着「成功」的拉丁乱码，靠替换字符守卫根本拦不住。
+            // 中文机器上 Encoding.Default 恒为 936，这条分支永远走不到，所以早先的自测
+            // 在本机全绿、推到 GitHub 才红。现在显式传入 ANSI 代码页，把那条路径重放一遍。
+            var cp1252 = Encoding.GetEncoding(1252);
+            Equal("运行库 中文测试", EncodedText.Decode(gbk, cp1252), "ANSI=1252 时仍能解出 GBK 中文");
+            Equal("名称版本 winget",
+                  EncodedText.Decode(Encoding.GetEncoding(936).GetBytes("名称版本 winget"), cp1252),
+                  "ANSI=1252 时 GBK 表格文本不被解成乱码");
+
+            // 反向约束：GBK 抢先不能把真正的西文文本抢走。
+            // "café résumé" 的 0xE9 后面跟 0x20（GBK 非法尾字节）→ 严格 GBK 会抛 → 交回 ANSI。
+            byte[] latin = cp1252.GetBytes("café résumé");
+            Equal("café résumé", EncodedText.Decode(latin, cp1252), "cp1252 西欧文本不被 GBK 抢走");
+
+            // 65001（Beta: UTF-8 全球语言支持）也要走 GBK 严格档，而不是靠 U+FFFD 守卫绕一圈
+            Equal("运行库 中文测试", EncodedText.Decode(gbk, Encoding.UTF8), "ANSI=65001 时仍能解出 GBK 中文");
+            // 936 路径必须保持原样（中文 Windows 的真实环境）
+            Equal("运行库 中文测试", EncodedText.Decode(gbk, Encoding.GetEncoding(936)), "ANSI=936 路径不变");
 
             // UTF-8 与 BOM 两条老路径不能被这次改动带坏
             Equal("中文", EncodedText.Decode(Encoding.UTF8.GetBytes("\uFEFF中文")), "UTF-8 BOM 仍被剥掉");

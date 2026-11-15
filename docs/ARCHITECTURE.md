@@ -1387,7 +1387,7 @@ graph TD
    构建后删掉这些冗余副本 + 用 `/p:ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch=None` 压掉该告警。
 3. `.bat` 必须**纯 ASCII**：cmd 按 OEM 代码页读取，UTF-8 中文注释会被误解析并吞掉后面的 `\`，
    把整份脚本的路径全部打乱（本目录三个 `.bat` 都已按此约束重写）。
-4. 自测工程用同一套工具链跑通：`tests\SelfTest\build-and-run.bat` → **427 项断言全通过**。
+4. 自测工程用同一套工具链跑通：`tests\SelfTest\build-and-run.bat` → **432 项断言全通过**。
    期间发现 3 个**用例**写错（不是产品缺陷）：
    - `name:google chrome` 被误当成「两个词都限定 name」。原版 `qt_app.py:747` 的 `name:` 只作用于紧跟的那一个词，
      第二词是 `any`，所以 `Google Chrome 32` 本应命中；
