@@ -20,7 +20,7 @@
 | 5 | `core/fsio.py::atomic_write_text` | `Core/AtomicFile.cs::WriteTextAtomic` | 一致 | 临时文件 + 替换；崩溃中断不留半个文件 |
 | 6 | `core/fsio.py::atomic_write_json` | `Core/AtomicFile.cs::WriteJsonAtomic` | 一致 | 同上（UTF-8 无 BOM） |
 | 7 | `core/logging_setup.py` | `Core/AppLogger.cs` | 等价 | 文件 INFO/WARNING/ERROR + 512KB×2 轮转；界面 tag 额外携带颜色语义 |
-| 8 | `core/version.py::APP_VERSION` | `Core/AppVersion.cs::Version` | 一致 | `2.18.0`；AssemblyInfo 四段同源 |
+| 8 | `core/version.py::APP_VERSION` | `Core/AppVersion.cs::Version` | 基线一致 | 原版 `2.18.0`；WPF 侧当前 `2.18.1`（界面修订独立递增），AssemblyInfo 四段同源 |
 | 9 | `services/winget_cli.py::WingetRepository.run/_run_once` | `Core/ProcessRunner.cs::Run` | 等价 | 200ms 轮询 + 互斥退避重试 + 取消杀进程树 |
 | 10 | `winget_cli._is_mutex_conflict`（`0x8A150001`） | `ProcessRunner`（`unchecked((int)0x8A150001)`） | 一致 | 退出码是负数，必须 unchecked 比较 |
 | 11 | `winget_cli._decode` | `Core/EncodedText.cs::Decode` | 一致 | `utf-8-sig` → GBK → 替换回退，优先顺序一致 |

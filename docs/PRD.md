@@ -123,7 +123,7 @@
 1. 无边框圆角窗口（`WindowChrome`：`GlassFrameThickness=0`、`CaptionHeight=0` 自管、`ResizeBorderThickness=7` 边缘缩放）；默认 1240×880，最小 940×600。
 2. 自绘标题栏 52px：品牌标 + 标题（渐变字）+ ⓘ 关于按钮 + `—` `□` `✕`；可拖动移动、双击最大化/还原。
 3. 设计令牌集中定义（颜色/字号/圆角/间距），按原 `qt_common.py` 取值：`BG #F4F5FA`、`CARD #FFFFFF`、`LINE #E8EAF3`、`TEXT #181C28`、`MUTED #6A7183`、`ACCENT #6366F1`、`ACCENT_DEEP #4F46E5`、`ACCENT_2 #8B5CF6`、`ACCENT_SOFT #EEF0FF`、`ACCENT_LINE #D9DCFF`、`WARN #B45309`/`WARN_BG #FFF8E8`、`ERR #C53030`、`ROW_HOVER #F7F8FE`、日志色 `LOG_OK #0B7A55`/`LOG_SKIP #6D4FD0`/`LOG_DONE #4F46E5` 等；字体 `HarmonyOS Sans SC` 回退 `微软雅黑`，等宽 `Consolas`；主按钮 135° 渐变 `ACCENT → ACCENT_2`。
-4. 关于对话框：显示版本 `2.18.0`（单一版本来源）、`复制诊断信息`、`打开数据文件夹`（`%LOCALAPPDATA%\WingetManager`）。
+4. 关于对话框：显示版本 `2.18.1`（单一版本来源）、`复制诊断信息`、`打开数据文件夹`（`%LOCALAPPDATA%\WingetManager`）。
 
 ### P1（应做到）
 
@@ -186,7 +186,7 @@
 **对话框/浮层**
 
 - **导出对话框**（模态，约 560px）：表单页（路径 + 更改… / 覆盖提示 / msstore 提示 / 导出）→ 成功页（✓ + 文件清单 + 恢复提示 + 「导出后打开文件夹」+ 关闭）。
-- **关于对话框**：应用名 + 版本 2.18.0 + 复制诊断信息 + 打开数据文件夹 + 关闭。
+- **关于对话框**：应用名 + 版本 2.18.1 + 复制诊断信息 + 打开数据文件夹 + 关闭。
 - **winget 缺失引导**：说明文案 + `打开应用商店` / `复制下载地址` / `知道了`。
 - **右键菜单**（列表行）：5 项，如 P0-D-7。
 - **flash 提示条**：批量操作后的短时提示（如「已全选当前 12 项」）。

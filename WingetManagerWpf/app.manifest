@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="2.18.0.0" name="WingetManagerWpf.app" />
+  <assemblyIdentity version="2.18.1.0" name="WingetManagerWpf.app" />
 
   <!-- 以当前用户权限运行：本工具只读 winget / 写自己的数据目录，不需要提权，
        提权反而会让 %LOCALAPPDATA% 变成管理员账户的数据目录。 -->

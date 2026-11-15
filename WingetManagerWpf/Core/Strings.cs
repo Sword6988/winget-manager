@@ -366,7 +366,7 @@ namespace WingetManagerWpf.Core
         public const string AboutRowLogFile = "运行日志";
         public const string AboutLogNotCreated = "本次未产生";
 
-        /// <summary>「版本 2.18.0 · WPF 桌面版」。</summary>
+        /// <summary>「版本 2.18.1 · WPF 桌面版」。</summary>
         public static string AboutVersionLine()
         {
             return "版本 " + AppVersion.Version + " · " + AppTag;

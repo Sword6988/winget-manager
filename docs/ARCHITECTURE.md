@@ -126,13 +126,13 @@
 | `WingetManagerWpf/app.manifest` | DPI 感知（PerMonitorV2）+ `requestedExecutionLevel=asInvoker` + 支持 Win10/11 `compatibility` |
 | `WingetManagerWpf/App.xaml` | 合并 `Theme/Tokens.xaml` + `Theme/Styles.xaml`；无 `StartupUri`（用代码启动） |
 | `WingetManagerWpf/App.xaml.cs` | 单实例 Mutex + 命名管道激活、全局异常兜底、日志初始化、`Main()` 编排 |
-| `WingetManagerWpf/AssemblyInfo.cs` | `AssemblyVersion/FileVersion = 2.18.0.0`（与 `Core/AppVersion.cs` 同步） |
+| `WingetManagerWpf/AssemblyInfo.cs` | `AssemblyVersion/FileVersion = 2.18.1.0`（与 `Core/AppVersion.cs` 同步） |
 
 ### 2.2 `Core/`（无 UI 依赖）
 
 | 文件 | 职责 |
 |---|---|
-| `Core/AppVersion.cs` ★ | `public const string Version = "2.18.0"`（单一来源，关于框/日志/诊断都用它） |
+| `Core/AppVersion.cs` ★ | `public const string Version = "2.18.1"`（单一来源，关于框/日志/诊断都用它） |
 | `Core/AppPaths.cs` ★ | `%LOCALAPPDATA%\WingetManager` 下 `selection.json` / `metadata-cache.json` / `settings.json` / `logs\app.log`；导出默认路径推导（上次 → `D:\apps.json` → 文档 → 用户目录） |
 | `Core/AppConfig.cs` ★ | 读 `WPM_WINGET_EXE` / `WPM_COMMAND_TIMEOUT`(10~3600,180) / `WPM_CACHE_TTL`(0~3600,60) / `WPM_META_TTL_DAYS`(0~3650,90)；`FindWinget()`（env → `PATH` → `%LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe`）；**探测失败不抛到顶层**，记 `WingetError` 供引导 |
 | `Core/AppException.cs` ★ | `AppException` + `ConfigInvalidException` / `WingetNotFoundException` / `WingetCommandFailedException` / `ScanCancelledException` / `BadRequestException`；每个带 `UserMessage`（中文可读） |
@@ -191,7 +191,7 @@
 | `Views/MainWindow.xaml.cs` | 实现 `IMainShell`；窗口拖动/最大化/窄窗适配；绑定快捷键；右键菜单；吸顶头 `ScrollChanged`；日志面板拖高 |
 | `Views/ListPresenter.cs` | 由「可见分组数据」命令式构建/更新 `GroupSectionControl` + `PackageRowControl`，维护 `RowIndex`（key → 行控件）与组位置表（吸顶用） |
 | `Views/ExportDialog.xaml(.cs)` | 560px 两页对话框：表单页（路径/更改…/覆盖提示/msstore 提示/主按钮）+ 成功页（✓/文件清单/双提示/打开文件夹/关闭） |
-| `Views/AboutDialog.xaml(.cs)` | 版本 2.18.0、复制诊断信息、打开数据文件夹 |
+| `Views/AboutDialog.xaml(.cs)` | 版本 2.18.1、复制诊断信息、打开数据文件夹 |
 | `Views/WingetGuideDialog.xaml(.cs)` | 三按钮引导（打开应用商店 / 复制下载地址 / 知道了）—— `MessageBox` 无法三按钮自定义，必须自建 |
 
 ### 2.7 `Controls/`
@@ -317,7 +317,7 @@ namespace WingetManagerWpf.Models
 ```csharp
 namespace WingetManagerWpf.Core
 {
-    public static class AppVersion { public const string Version = "2.18.0"; }
+    public static class AppVersion { public const string Version = "2.18.1"; }
 
     public static class AppPaths
     {
@@ -1024,7 +1024,7 @@ Rebuild(keepScroll):
 #### T12 关于对话框 + 完整引导 + 日志另存
 - **源文件**：`Views/AboutDialog.xaml(.cs)`、`Views/WingetGuideDialog.xaml(.cs)`（若 T09 未完成则在此收口）、`Views/MainWindow.xaml.cs`（日志「保存…」）、`Core/Strings.cs`（诊断文案）
 - **关键行为**
-  - 关于框 560px：44×44 渐变图标 + 「Winget 软件管家」+ `版本 2.18.0`（取 `AppVersion.Version`，**单一来源**）+ 说明行 + 三按钮（复制诊断信息 / 打开数据文件夹 / 关闭）；
+  - 关于框 560px：44×44 渐变图标 + 「Winget 软件管家」+ `版本 2.18.1`（取 `AppVersion.Version`，**单一来源**）+ 说明行 + 三按钮（复制诊断信息 / 打开数据文件夹 / 关闭）；
   - 诊断信息内容：版本、winget 版本、OS 版本、架构、数据目录、勾选数、包数、日志尾部摘要（≥ 8 行）；
   - 「打开数据文件夹」→ `Process.Start("explorer.exe", AppPaths.DataDir)`；
   - 日志「保存…」→ `SaveFileDialog`（默认 `用户目录\winget-manager-yyyyMMdd-HHmm.log`）→ UTF-8 写盘 → flash「日志已保存：xxx.log」；空日志 → flash「日志还是空的」。

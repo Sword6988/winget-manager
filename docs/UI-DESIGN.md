@@ -3,7 +3,7 @@
 > 后续方案见 `ui-v3/UI-DESIGN-v3.md`（v3「清单工作台」：列表优先布局 + 上下文选择条 + 可交互原型）。
 > 本文档描述的是当前线上实现，v3 尚未落地。
 
-> 适用版本：WingetManagerWpf v2.18.0（WPF 重制版）
+> 适用版本：WingetManagerWpf v2.18.1（WPF 重制版）
 > 生效范围：`Theme/Tokens.xaml`（全量）、`Theme/Styles.xaml`、`MainWindow`、`PackageRowControl`、`app.ico`
 > 兼容性：所有旧令牌键名保留，未引用任何新第三方库；`tests/SelfTest` 445 项断言全部通过
 
