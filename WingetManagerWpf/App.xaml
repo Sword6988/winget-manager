@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application x:Class="WingetManagerWpf.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <!-- 无 StartupUri：主窗口由代码创建（阶段二接上 Views/MainWindow）。
+         阶段一还没有任何窗口，ShutdownMode 用 OnExplicitShutdown，
+         避免「无窗口 → 应用立刻退出」的框架默认行为干扰后续接线。 -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Theme/Tokens.xaml" />
+                <ResourceDictionary Source="Theme/Styles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,279 @@
+%% WingetManagerWpf · 类图（与 docs/ARCHITECTURE.md §3.5 一致）
+classDiagram
+    %% ---------- Core ----------
+    class AppConfig {
+        +string WingetExe
+        +string WingetError
+        +int CommandTimeout
+        +int CacheTtlSeconds
+        +Load() AppConfig
+    }
+    class AppPaths {
+        +string DataDir
+        +string LogFile
+        +string SelectionFile
+        +string MetadataCacheFile
+        +string SettingsFile
+        +DefaultExportPath(last) string
+        +bool DataDirWritable
+    }
+    class AtomicFile {
+        +WriteTextAtomic(path, text, enc)
+        +WriteJsonAtomic(path, json)
+        +WriteAllBytesAtomic(path, bytes)
+    }
+    class EncodedText {
+        +Decode(byte[]) string
+        +CharWidth(char) int
+        +DisplayWidth(string) int
+    }
+    class AppLogger {
+        +event LogEmitted
+        +Info(msg)
+        +Warn(msg)
+        +Error(msg, ex)
+        +Success(msg)
+    }
+    class SettingsStore {
+        +Load() AppSettings
+        +Save(AppSettings)
+    }
+    class JsonValue
+    class JsonWriter
+    class JsonReader
+
+    %% ---------- Models ----------
+    class RawPackage {
+        +string Name
+        +string PackageId
+        +string Version
+        +string Available
+        +string Source
+    }
+    class Package {
+        +string PackageIdentifier
+        +string Name
+        +string Version
+        +string AvailableVersion
+        +string Source
+        +IdKind IdKind
+        +bool Reinstallable
+        +bool IsDependency
+        +string Key
+    }
+    class CatalogSnapshot {
+        +string GeneratedAt
+        +int DurationMs
+        +string WingetVersion
+        +CatalogCounts Counts
+        +IList~Package~ Packages
+    }
+    class AppSettings {
+        +int WindowX
+        +int WindowY
+        +bool Maximized
+        +int LogHeight
+        +bool LogExpanded
+        +string Category
+        +string ExportPath
+    }
+    class ExportResult {
+        +IList~string~ Files
+        +int PackageCount
+        +int UninstallableCount
+        +SourceBreakdown Breakdown
+    }
+    class Groups {
+        <<static>>
+        +string Software
+        +string Dependency
+        +string Unsupported
+        +GroupOf(Package) string
+    }
+
+    %% ---------- Services ----------
+    class IWingetRepository {
+        <<interface>>
+        +VersionAsync(ct) Task~string~
+        +RunAsync(args, timeout, ct) Task~CommandResult~
+        +ListInstalledAsync(ct) Task~CommandResult~
+        +ShowMetadataAsync(id, ct) Task~CommandResult~
+    }
+    class WingetRepository
+    class ProcessRunner {
+        +RunAsync(exe, args, timeoutSec, ct) Task~ProcessRaw~
+    }
+    class CommandResult {
+        +string[] Args
+        +int ExitCode
+        +string StdOut
+        +string StdErr
+        +int DurationMs
+        +bool Ok
+        +bool IsMutexConflict
+    }
+    class WingetTableParser {
+        <<static>>
+        +Parse(string) IList~RawPackage~
+    }
+    class PackageCatalog {
+        +GetCatalogAsync(force, ct, ver) Task~CatalogSnapshot~
+        +PendingMetadataIds(snapshot) IList~string~
+        +IsReinstallable(RawPackage) bool
+        +IsDependencyKeyword(RawPackage) bool
+        +IdKindOf(string) IdKind
+    }
+    class RuntimeCache {
+        +Get(id) bool?
+        +Put(id, dep)
+        +int Count
+    }
+    class MetadataProbe {
+        <<static>>
+        +Analyze(string) RuntimeSignal
+        +EnrichAsync(repo, cache, ids, kwDeps, progress, gate, ct) Task
+    }
+    class ScanService {
+        +ScanAsync(ct) Task~CatalogSnapshot~
+    }
+    class SelectionStore {
+        +Load() IDictionary~string,bool~
+        +Save(selection)
+    }
+    class ExportProfiles {
+        <<static>>
+        +NormalizeWingetVersion(raw) string
+        +BuildManifest(selected, ver) string
+        +SourceBreakdown(selected) SourceBreakdown
+        +BuildRestoreBat(name, count, msStore) byte[]
+        +BuildUninstallableList(packages) string
+        +WriteAll(path, selected, all, ver, log) ExportResult
+    }
+
+    %% ---------- ViewModels ----------
+    class MainViewModel {
+        +AppState State
+        +IList~Package~ Packages
+        +IDictionary~string,bool~ Selection
+        +ICommand ScanOrCancelCommand
+        +Initialize()
+        +StartOrCancelScan()
+        +SetSearchText(text)
+        +SelectCategory(cat)
+        +ToggleRow(pkg)
+        +SetGroupSelection(group, selectAll)
+        +Shutdown()
+    }
+    class IMainShell {
+        <<interface>>
+        +ApplyState(AppState)
+        +RenderGroups(groups, matched, keepScroll)
+        +UpdateGroupCounts()
+        +RebuildCategoryChips(chips, active)
+        +SetCounters(t, r, s, d)
+        +SetSubtitle(text)
+        +SetStatus(text)
+        +Flash(text)
+        +AppendLog(LogEntry)
+        +ShowEmptyState(msg, clearBtn)
+        +ShowSkeleton(bool)
+        +SetScanElapsed(TimeSpan)
+        +SetBusy(bool)
+        +UpdateStickyHeader(title, sel, total)
+        +ScrollToGroup(title)
+    }
+    class ObservableObject
+    class RelayCommand
+    class LogEntry
+
+    %% ---------- Views / Controls ----------
+    class MainWindow
+    class ListPresenter {
+        +Rebuild(keepScroll)
+        +UpdateCounts()
+        +UpdateSectionTops()
+    }
+    class ExportDialog
+    class AboutDialog
+    class WingetGuideDialog
+    class TitleBarControl
+    class StatCard
+    class CountPill
+    class CheckBoxEx
+    class MiniProgress
+    class GradientText
+    class PackageRowControl
+    class GroupHeaderControl
+    class GroupSectionControl
+    class StickyGroupHeader
+    class LogPanelControl
+    class EmptyStatePanel
+    class SkeletonPanel
+
+    %% ---------- 关系 ----------
+    AppConfig --> AppPaths
+    AppPaths --> AtomicFile
+    SettingsStore --> AppSettings
+    SettingsStore --> AtomicFile
+    AppLogger --> AppPaths
+    JsonWriter --> JsonValue
+    JsonReader --> JsonValue
+    AtomicFile --> JsonWriter
+
+    WingetRepository ..|> IWingetRepository
+    WingetRepository --> ProcessRunner
+    ProcessRunner --> CommandResult
+    ProcessRunner --> EncodedText
+    WingetRepository --> AppConfig
+    WingetRepository --> AppLogger
+
+    PackageCatalog --> IWingetRepository
+    PackageCatalog --> RuntimeCache
+    PackageCatalog --> WingetTableParser
+    PackageCatalog --> CatalogSnapshot
+    WingetTableParser --> RawPackage
+    WingetTableParser --> EncodedText
+    CatalogSnapshot --> Package
+    Package ..> RawPackage : 规范化
+    PackageCatalog ..> Groups : 分组判定
+
+    ScanService --> PackageCatalog
+    ScanService --> IWingetRepository
+    MetadataProbe --> IWingetRepository
+    MetadataProbe --> RuntimeCache
+    RuntimeCache --> AtomicFile
+    SelectionStore --> AtomicFile
+    ExportProfiles --> Package
+    ExportProfiles --> ExportResult
+    ExportProfiles --> AtomicFile
+
+    MainViewModel --> ScanService
+    MainViewModel --> MetadataProbe
+    MainViewModel --> PackageCatalog
+    MainViewModel --> SelectionStore
+    MainViewModel --> SettingsStore
+    MainViewModel --> ExportProfiles
+    MainViewModel --> ObservableObject
+    MainViewModel --> RelayCommand
+    MainViewModel ..> IMainShell : 只通过接口驱动 UI
+
+    MainWindow ..|> IMainShell
+    MainWindow --> ListPresenter
+    MainWindow --> TitleBarControl
+    MainWindow --> StatCard
+    MainWindow --> StickyGroupHeader
+    MainWindow --> LogPanelControl
+    MainWindow --> EmptyStatePanel
+    MainWindow --> SkeletonPanel
+    MainWindow --> ExportDialog
+    MainWindow --> AboutDialog
+    MainWindow --> WingetGuideDialog
+
+    ListPresenter --> GroupSectionControl
+    GroupSectionControl --> GroupHeaderControl
+    GroupSectionControl --> PackageRowControl
+    GroupHeaderControl --> CountPill
+    PackageRowControl --> CheckBoxEx
+    StatCard --> GradientText
+    TitleBarControl --> GradientText
+    LogPanelControl --> LogEntry

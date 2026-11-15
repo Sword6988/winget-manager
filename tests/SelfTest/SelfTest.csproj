@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    QA 自测工程（传统 csproj、net48、零 NuGet）。
+
+    用途：把被测工程的 Core/ Models/ Services/ ViewModels/（不含 Views/*.xaml 及
+    App.xaml.cs 等任何 UI 代码）以 Compile Link 的方式编译进一个控制台程序，
+    用手写断言验证业务逻辑与原版 Python（_ref/）行为一致。
+
+    注意：
+    1. 本工程不含被测工程的 .xaml（没有 PresentationFramework 依赖也能编译），
+       因此 MSBuild 不需要 WPF targets，只引用 System / System.Core 即可。
+    2. Core/ProcessRunner.cs 与 Core/SingleInstance.cs 被链接进来（它们无 UI 依赖，
+       能编译），但**不测**——二者需要真实的子进程 / 命名管道 / Mutex 环境。
+    3. 编译方式见 run-selftest.bat 与 tests/README.md。
+-->
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{7A3F5C21-9E44-4B6D-8A21-C5D9E0B7F3A4}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>WingetManagerWpf.SelfTest</RootNamespace>
+    <AssemblyName>SelfTest</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <LangVersion>7.3</LangVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 被测源码没有 UI 依赖，System / System.Core 足够 -->
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- ══════ 被测工程源码（只链非 UI 层） ══════ -->
+    <Compile Include="..\..\WingetManagerWpf\Core\**\*.cs">
+      <Link>Src\Core\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
+    <Compile Include="..\..\WingetManagerWpf\Models\**\*.cs">
+      <Link>Src\Models\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
+    <Compile Include="..\..\WingetManagerWpf\Services\**\*.cs">
+      <Link>Src\Services\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
+    <Compile Include="..\..\WingetManagerWpf\ViewModels\**\*.cs">
+      <Link>Src\ViewModels\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
+    <!-- ListPresenter 刻意不引用 System.Windows，可在控制台直接测 -->
+    <Compile Include="..\..\WingetManagerWpf\Views\ListPresenter.cs">
+      <Link>Src\Views\ListPresenter.cs</Link>
+    </Compile>
+    <!-- ══════ 自测代码 ══════ -->
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

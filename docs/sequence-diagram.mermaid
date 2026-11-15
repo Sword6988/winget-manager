@@ -1,0 +1,156 @@
+%% WingetManagerWpf · 关键流程时序图 + 状态机
+%% 与 docs/ARCHITECTURE.md §4 保持一致；可粘贴到 mermaid.live 渲染。
+%% 注意：这里用分号分隔多个图，渲染时请按图块逐个使用。
+
+%% ============================================================
+%% 图 1：启动扫描 → 解析 → 分组 → UI 呈现 → 启动元数据核查
+%% ============================================================
+sequenceDiagram
+    autonumber
+    participant App as App.xaml.cs
+    participant MW as MainWindow
+    participant VM as MainViewModel
+    participant SS as ScanService
+    participant Repo as WingetRepository
+    participant Cat as PackageCatalog
+    participant Parser as WingetTableParser
+    participant RC as RuntimeCache
+    participant MP as MetadataProbe
+    participant UI as IMainShell 实现
+
+    App->>App: 单实例 Mutex（已存在 → 发管道 SHOW 后退出）
+    App->>App: AppLogger.Create() / AppConfig.Load()
+    App->>MW: new MainWindow(cfg)
+    MW->>VM: new MainViewModel(...) + 实现 IMainShell
+    VM->>VM: selectionStore.Load()（严格布尔，键小写）
+    VM->>UI: ApplyState(Boot) + SetSubtitle("正在扫描已安装软件…")
+    VM-->>VM: DispatcherTimer 80ms 单次
+    VM->>VM: StartOrCancelScan() → State=Scanning
+    VM->>UI: SetBusy(true) / ShowSkeleton(true) / 启动 100ms 计时
+    VM->>SS: ScanAsync(cts.Token)
+
+    SS->>Repo: VersionAsync(ct)
+    Repo->>Repo: ProcessRunner.Run("--version", 30s, ct)
+    alt 退出码 0 且有输出
+        Repo-->>SS: "1.30.100"（已剥离 v 前缀）
+    else 空输出
+        Repo-->>SS: "unknown"（继续扫描，不判未安装）
+    else 文件不存在
+        Repo-->>SS: throw WingetNotFoundException
+    end
+
+    SS->>Cat: GetCatalogAsync(force:true, ct, ver)
+    Cat->>Repo: ListInstalledAsync(ct)
+    Repo->>Repo: 互斥冲突 → 退避 0.4s 重试（≤2 次，计入总超时）
+    Repo-->>Cat: CommandResult（StdOut 已按 utf-8-sig→utf-8→GBK 解码）
+    Cat->>Parser: Parse(stdout)
+    Parser->>Parser: 定位分隔线 ^-{5,}$ → 表头标签 → 显示宽度切列
+    alt 表头定位失败 / 无数据
+        Parser->>Parser: 兜底：按 2+ 空格从右往左认领
+    end
+    Parser-->>Cat: IList<RawPackage>（噪音行已过滤）
+    loop 每个 RawPackage
+        Cat->>Cat: IsReinstallable / IsDependencyKeyword / IdKindOf
+        Cat->>RC: Get(id)（dep=True 覆盖关键词；False 不构成否定）
+        Cat->>Cat: 去重（保留可重装那条）→ 排序（可重装优先，组内按名称小写）
+    end
+    Cat-->>SS: CatalogSnapshot（durationMs / counts / packages）
+
+    SS-->>VM: snapshot
+    VM->>VM: 清理已卸载项残留勾选（日志告知数量）
+    VM->>VM: 恢复上次分组（不存在则回落「全部」）
+    VM->>UI: RebuildCategoryChips(全部/软件/运行库/winget 不支持)
+    VM->>UI: RenderGroups(三个分节, matched=N, keepScroll=true)
+    VM->>UI: SetCounters / SetSubtitle / ApplyState(Ready) / ShowSkeleton(false)
+    VM->>VM: selectionStore.Save(Selection)
+
+    VM->>Cat: PendingMetadataIds(snapshot)
+    Cat-->>VM: pendingIds（可重装 ∧ 关键词=软件 ∧ 缓存未核查）
+    alt pendingIds 非空
+        VM->>UI: AppendLog(info, "元数据核查：N 个新包待核查…")
+        VM->>MP: EnrichAsync(repo, cache, pending, keywordDeps, progress, scanGate, ct)
+        loop 每个待核查 ID（scanGate 置位则挂起让路）
+            MP->>Repo: ShowMetadataAsync(id, ct)
+            MP->>MP: Analyze(text) → 描述/标记/InstallerURL 找信号词
+            alt dep 已知（True/False）
+                MP->>RC: Put(id, dep)（立即落盘）
+                MP->>MP: 与关键词初判不同才进 batch（满 5 条）
+                MP-->>VM: IProgress<MetadataBatch>
+                VM->>VM: 批量回写 Package.IsDependency
+                VM->>UI: RenderGroups(false) + UpdateGroupCounts + RebuildCategoryChips + AppendLog
+            else 解析不出（None）
+                MP->>MP: 不写缓存，下次扫描重试（failed++）
+            end
+        end
+        MP-->>VM: 完成统计 → AppendLog("元数据核查完成：…")
+    end
+
+%% ============================================================
+%% 图 2：导出 → 三产物写盘 → 成功页
+%% ============================================================
+sequenceDiagram
+    autonumber
+    participant User as 用户
+    participant MW as MainWindow
+    participant VM as MainViewModel
+    participant Dlg as ExportDialog
+    participant EP as ExportProfiles
+    participant AF as AtomicFile
+    participant Log as AppLogger
+
+    User->>VM: 点「导出配置」(Ctrl+E) / 主按钮（0 勾选时 disabled）
+    VM->>VM: selected = Packages ∩ Selection（全为可重装包）
+    VM->>Dlg: new ExportDialog(selected, snapshot.WingetVersion ?? "1.10.0", 默认路径)
+    Dlg->>Dlg: SourceBreakdown(selected) → msstore 计数
+    Dlg->>Dlg: dest 存在？ → hint 琥珀 + 主按钮「覆盖导出」；否则「立即导出」
+    User->>Dlg: 点「更改…」(可选，强制 .json 后缀)
+    User->>Dlg: 点「立即导出 / 覆盖导出」
+    Dlg->>Dlg: 禁用主按钮，hint = "正在导出…"
+    Dlg->>EP: WriteAll(jsonPath, selected, allPackages, wingetVersion, log)
+
+    EP->>EP: 1) BuildManifest(selected, NormalizeWingetVersion(ver))
+    Note over EP: Sources 按 winget / msstore 分组（空组不写）<br/>SourceDetails 固定常量；键序 $schema/CreationDate/Sources/WinGetVersion
+    EP->>AF: WriteJsonAtomic(apps.json)  UTF-8 无 BOM + 缩进 2
+    EP->>EP: 2) BuildRestoreBat(stem, count=breakdown.Total, msstore)
+    Note over EP: GBK 编码（ExceptionFallback）+ CRLF + chcp 936<br/>Path.GetFileName + % 双写
+    EP->>AF: WriteAllBytesAtomic(恢复-{stem}.bat)
+    EP->>EP: 3) BuildUninstallableHtml(全部非可重装包)
+    Note over EP: 仅当存在非可重装包；单文件 HTML（UTF-8 无 BOM + CRLF）
+    EP->>AF: WriteTextAtomic(无法自动重装清单-{stem}.html)
+    EP-->>Dlg: ExportResult{Files, Breakdown, UninstallableCount}
+
+    Dlg->>VM: settings.ExportPath = jsonPath; OnExportFinished(result)
+    VM->>Log: AppendLog(done, "已导出 N 个软件包：") + 逐文件 info 路径
+    alt Breakdown.MsStore > 0
+        VM->>Log: AppendLog(skip, "其中 M 个来自 msstore，恢复时可能需登录微软商店")
+    end
+    Dlg->>Dlg: 切成功页：✓ 徽章 + 文件清单（kind + 文件名 + 完整路径 ToolTip）
+    Dlg->>Dlg: +「恢复」提示、「无法自动重装清单」提示、「导出后打开文件夹」勾选行
+    User->>Dlg: 点「关闭」
+    alt 「导出后打开文件夹」勾选
+        Dlg->>Dlg: Explorer 打开 dest 目录（失败静默）
+    end
+    Dlg-->>MW: DialogResult（模态结束）
+
+%% ============================================================
+%% 图 3：主状态机
+%% ============================================================
+stateDiagram-v2
+    [*] --> Boot
+    Boot --> Scanning : 80ms 自动首扫 / 点「重新扫描」
+    Scanning --> Ready : 扫描成功（有数据）
+    Scanning --> ScanFailed : 异常且非取消
+    Scanning --> NoWinget : WingetNotFoundException
+    Scanning --> Cancelled : 用户取消 ∧ 无旧数据
+    Scanning --> Ready : 用户取消 ∧ 有旧数据（保留列表）
+    ScanFailed --> Scanning : 点「重新扫描」
+    NoWinget --> Scanning : 点「重新扫描」
+    Cancelled --> Scanning : 点「重新扫描」
+    Ready --> Scanning : 点「重新扫描」/ F5
+    note right of Scanning
+        禁用矩阵：搜索框 / 全选 / 全不选 / 反选 /
+        仅看已选 / 导出配置 全部禁用；
+        同一按钮文案变「取消扫描」；
+        F5 只提示「扫描进行中，请点「取消扫描」中断」；
+        上一轮未收尾 → 「上一轮扫描仍在收尾，请稍候」
+    end note

@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{8E4C9B2A-6D1F-4A87-9C3E-2F5B7D1A6E90}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>WingetManagerWpf</RootNamespace>
+    <!-- 产物名就是绿色版最终文件名：WingetManager.exe（不含 Wpf 后缀更像个成品） -->
+    <AssemblyName>WingetManager</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <UseWPF>true</UseWPF>
+    <!-- 语言版本钉死 7.3：本机没有 SDK，无法验证 C# 8+ 语法，宁可不写也不埋雷 -->
+    <LangVersion>7.3</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <FileAlignment>512</FileAlignment>
+    <!-- 零 NuGet ⇒ 不存在程序集版本冲突，关掉重定向就不会生成 exe.config，产物只留一个 exe -->
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateSerializationAssemblies>Off</GenerateSerializationAssemblies>
+    <Deterministic>true</Deterministic>
+    <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <!-- 由 tools/make_icon.py 生成（纯标准库脚本，见 README「图标」一节） -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <Optimize>true</Optimize>
+    <!-- Release 不产 pdb：dist 目录里只允许出现一个 exe -->
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 零 NuGet：只用 .NET Framework 4.8 自带程序集 -->
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.Xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 应用图标：exe 资源 + 运行时窗口 Icon 共用同一文件 -->
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+    <Page Include="Theme\Tokens.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Theme\Styles.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Views\MainWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Views\AboutDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Views\ExportDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Views\WingetGuideDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Controls\PackageRowControl.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Controls\GroupHeaderControl.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Controls\GroupSectionControl.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Controls\StickyGroupHeader.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Controls\LogPanelControl.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Controls\EmptyStatePanel.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Controls\SkeletonPanel.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="App.xaml.cs">
+      <DependentUpon>App.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="AssemblyInfo.cs" />
+    <Compile Include="Core\AppConfig.cs" />
+    <Compile Include="Core\AppException.cs" />
+    <Compile Include="Core\AppLogger.cs" />
+    <Compile Include="Core\AppPaths.cs" />
+    <Compile Include="Core\AppVersion.cs" />
+    <Compile Include="Core\AtomicFile.cs" />
+    <Compile Include="Core\EncodedText.cs" />
+    <Compile Include="Core\Json\JsonReader.cs" />
+    <Compile Include="Core\Json\JsonValue.cs" />
+    <Compile Include="Core\Json\JsonWriter.cs" />
+    <Compile Include="Core\Metrics.cs" />
+    <Compile Include="Core\ProcessRunner.cs" />
+    <Compile Include="Core\SettingsStore.cs" />
+    <Compile Include="Core\SingleInstance.cs" />
+    <Compile Include="Core\Strings.cs" />
+    <Compile Include="Models\AppSettings.cs" />
+    <Compile Include="Models\CatalogSnapshot.cs" />
+    <Compile Include="Models\ExportResult.cs" />
+    <Compile Include="Models\Groups.cs" />
+    <Compile Include="Models\Package.cs" />
+    <Compile Include="Models\RawPackage.cs" />
+    <Compile Include="Services\CommandResult.cs" />
+    <Compile Include="Services\ExportProfiles.cs" />
+    <Compile Include="Services\MetadataProbe.cs" />
+    <Compile Include="Services\PackageCatalog.cs" />
+    <Compile Include="Services\RuntimeCache.cs" />
+    <Compile Include="Services\ScanService.cs" />
+    <Compile Include="Services\SelectionStore.cs" />
+    <Compile Include="Services\WingetRepository.cs" />
+    <Compile Include="Services\WingetTableParser.cs" />
+    <Compile Include="ViewModels\IMainShell.cs" />
+    <Compile Include="ViewModels\LogEntry.cs" />
+    <Compile Include="ViewModels\MainViewModel.cs" />
+    <Compile Include="ViewModels\ObservableObject.cs" />
+    <Compile Include="ViewModels\RelayCommand.cs" />
+    <Compile Include="ViewModels\SearchQuery.cs" />
+    <Compile Include="Views\ListPresenter.cs" />
+    <Compile Include="Views\MainWindow.V3.cs" />
+    <Compile Include="Views\MainWindow.xaml.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\AboutDialog.xaml.cs">
+      <DependentUpon>AboutDialog.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\ExportDialog.xaml.cs">
+      <DependentUpon>ExportDialog.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\WingetGuideDialog.xaml.cs">
+      <DependentUpon>WingetGuideDialog.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Controls\CheckBoxEx.cs" />
+    <Compile Include="Controls\CountPill.cs" />
+    <Compile Include="Controls\DialogSizer.cs" />
+    <Compile Include="Controls\GradientText.cs" />
+    <Compile Include="Controls\MiniProgress.cs" />
+    <Compile Include="Controls\StatCard.cs" />
+    <Compile Include="Controls\ThemeLookup.cs" />
+    <Compile Include="Controls\EmptyStatePanel.xaml.cs">
+      <DependentUpon>EmptyStatePanel.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Controls\GroupHeaderControl.xaml.cs">
+      <DependentUpon>GroupHeaderControl.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Controls\GroupSectionControl.xaml.cs">
+      <DependentUpon>GroupSectionControl.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Controls\LogPanelControl.xaml.cs">
+      <DependentUpon>LogPanelControl.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Controls\PackageRowControl.xaml.cs">
+      <DependentUpon>PackageRowControl.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Controls\SkeletonPanel.xaml.cs">
+      <DependentUpon>SkeletonPanel.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Controls\StickyGroupHeader.xaml.cs">
+      <DependentUpon>StickyGroupHeader.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

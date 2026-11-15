@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    骨架屏：首扫还没回来时占位，形状照着真实行做（圆块 + 两行灰条），
+    数据一到就直接换成真行，视觉上没有「跳一下」的突变。
+-->
+<UserControl x:Class="WingetManagerWpf.Controls.SkeletonPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Visibility="Collapsed">
+
+    <!-- 6 行占位块由代码生成（6 段几乎一样的 XAML 只会制造维护负担） -->
+    <StackPanel x:Name="Host" Margin="0,6,0,0" VerticalAlignment="Top" />
+</UserControl>

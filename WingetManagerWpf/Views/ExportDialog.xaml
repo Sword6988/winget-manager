@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    导出对话框（560px 固定宽，高度自适应）。两页用 Visibility 切换，不用 Frame：
+    Frame 会带自己的导航栈与日志输出，为了两页切换引入一整套 Page 生命周期不值。
+
+    表单页：确认路径 → 写出 apps.json + 恢复脚本 + 无法自动重装清单。
+    成功页：告诉用户「写到了哪几个文件」以及「重装系统后怎么用」。
+
+    三个产物文件名后缀一致（stem 同名），所以表单页的 hint 就把「同目录另存…」提前说清，
+    避免用户看到目录里凭空多出两个文件时以为中招了。
+-->
+<Window x:Class="WingetManagerWpf.Views.ExportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:WingetManagerWpf.Controls"
+        Width="560"
+        Height="400"
+        SizeToContent="Manual"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="pack://application:,,,/Assets/app.ico"
+        FontFamily="{StaticResource FontFamily.Ui}"
+        TextOptions.TextFormattingMode="Ideal"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True">
+
+    <!-- 高度策略：SizeToContent=Manual + 400 初值（表单页），Loaded 后由 DialogSizer 收到精确高度；
+         切到成功页时再收一次（成功页更高，不重算会把底部「关闭」裁掉）。 -->
+    <Border x:Name="RootBorder"
+            Margin="18"
+            Background="{StaticResource Brush.Card}"
+            BorderBrush="{StaticResource Brush.Line}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource Corner.Card}">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="26"
+                              ShadowDepth="8"
+                              Opacity="0.16"
+                              Color="{StaticResource Color.ShadowFx}" />
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- ══════════ 0. 自绘标题栏（只有这里可拖动，按钮区不抢鼠标） ══════════ -->
+            <Grid Grid.Row="0" Background="Transparent" MouseLeftButtonDown="OnTitleBarMouseDown">
+                <TextBlock x:Name="TitleText"
+                           Margin="28,0,0,0"
+                           VerticalAlignment="Center"
+                           FontSize="{StaticResource FontSize.Body}"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource Brush.Text}" />
+
+                <Button x:Name="TitleCloseButton"
+                        Margin="0,0,8,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Content="✕"
+                        Style="{StaticResource Button.WindowButton}" />
+            </Grid>
+
+            <!-- ══════════ 1. 表单页 ══════════ -->
+            <StackPanel x:Name="FormPage" Grid.Row="1" Margin="28,2,28,22">
+                <controls:GradientText x:Name="FormTitle" TextFontSize="22.7" Bold="True" />
+
+                <TextBlock x:Name="FormDesc"
+                           Margin="0,8,0,0"
+                           TextWrapping="Wrap"
+                           LineHeight="20"
+                           FontSize="{StaticResource FontSize.Body}"
+                           Foreground="{StaticResource Brush.Muted}" />
+
+                <!-- 路径行：只读 TextBox 便于用户复制路径；圆角靠外层 Border 画 -->
+                <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Height="36"
+                            Background="{StaticResource Brush.GlassInput}"
+                            BorderBrush="{StaticResource Brush.Line}"
+                            BorderThickness="1"
+                            CornerRadius="{StaticResource Corner.Bar}">
+                        <TextBox x:Name="PathBox"
+                                 Padding="10,0"
+                                 VerticalContentAlignment="Center"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 IsReadOnly="True"
+                                 FontFamily="{StaticResource FontFamily.Mono}"
+                                 FontSize="11.5"
+                                 Foreground="{StaticResource Brush.Text}" />
+                    </Border>
+
+                    <Button x:Name="ChangeButton"
+                            Grid.Column="1"
+                            Width="88"
+                            Height="36"
+                            Margin="10,0,0,0"
+                            Style="{StaticResource Button.Outline}" />
+                </Grid>
+
+                <!-- hint：目标存在 / 非法文件名 / 正在导出，三态共用这一行 -->
+                <TextBlock x:Name="HintText"
+                           Margin="0,10,0,0"
+                           MinHeight="22"
+                           TextWrapping="Wrap"
+                           FontSize="{StaticResource FontSize.RowId}"
+                           Foreground="{StaticResource Brush.Muted2}" />
+
+                <StackPanel Margin="0,12,0,0" HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button x:Name="CancelButton" Width="88" Style="{StaticResource Button.Outline}" />
+                    <Button x:Name="PrimaryButton"
+                            MinWidth="104"
+                            Margin="10,0,0,0"
+                            Style="{StaticResource Button.Primary}" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- ══════════ 2. 成功页 ══════════ -->
+            <StackPanel x:Name="SuccessPage"
+                        Grid.Row="1"
+                        Margin="28,2,28,22"
+                        Visibility="Collapsed">
+
+                <!-- ✓ 用 Path 画：字体符号在缺字体的机器上会变成豆腐块 -->
+                <Border Width="46"
+                        Height="46"
+                        HorizontalAlignment="Left"
+                        Background="{StaticResource Brush.AccentGradient}"
+                        CornerRadius="23">
+                    <Canvas Width="46" Height="46">
+                        <Path Stroke="#FFFFFFFF"
+                              StrokeThickness="3"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round"
+                              Data="M13,24 L20,31 L33,16" />
+                    </Canvas>
+                </Border>
+
+                <controls:GradientText x:Name="SuccessTitle"
+                                       Margin="0,14,0,0"
+                                       TextFontSize="20"
+                                       Bold="True" />
+
+                <!-- 文件清单：行由 code-behind 按 ExportResult.Files 生成 -->
+                <StackPanel x:Name="FileListHost" Margin="0,12,0,0" />
+
+                <TextBlock x:Name="BatTipText"
+                           Margin="0,14,0,0"
+                           TextWrapping="Wrap"
+                           LineHeight="19"
+                           FontSize="{StaticResource FontSize.RowId}"
+                           Foreground="{StaticResource Brush.Muted2}"
+                           Visibility="Collapsed" />
+
+                <TextBlock x:Name="ListTipText"
+                           Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           LineHeight="19"
+                           FontSize="{StaticResource FontSize.RowId}"
+                           Foreground="{StaticResource Brush.Muted2}"
+                           Visibility="Collapsed" />
+
+                <Grid x:Name="OpenFolderRow"
+                      Margin="0,14,0,0"
+                      Background="Transparent"
+                      MouseLeftButtonUp="OnToggleOpenFolder">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <controls:CheckBoxEx x:Name="OpenFolderCheck" VerticalAlignment="Center" />
+
+                    <TextBlock x:Name="OpenFolderLabel"
+                               Grid.Column="1"
+                               Margin="10,0,0,0"
+                               VerticalAlignment="Center"
+                               FontSize="{StaticResource FontSize.Body}"
+                               Foreground="{StaticResource Brush.Muted}" />
+                </Grid>
+
+                <StackPanel Margin="0,14,0,0" HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button x:Name="CloseButton" Width="96" Style="{StaticResource Button.Primary}" />
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

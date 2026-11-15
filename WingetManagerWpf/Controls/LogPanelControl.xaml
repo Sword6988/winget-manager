@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    日志面板：标题行 34 + 可滚动的着色日志区。上沿有 9px 抓手可拖高（90~420），
+    双击抓手或点「收起/展开」在 34 高与上次高度之间切换。
+-->
+<UserControl x:Class="WingetManagerWpf.Controls.LogPanelControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Height="150"
+             SnapsToDevicePixels="True">
+
+    <Border Background="{StaticResource Brush.LogBg}"
+            BorderBrush="{StaticResource Brush.Line}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource Corner.Card}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- ══ 标题行 ══ -->
+            <Grid Grid.Row="0" Margin="16,0,14,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 6px 圆点：有日志在滚的时候它就是个「这里在动」的锚点 -->
+                <Ellipse Grid.Column="0"
+                         Width="6"
+                         Height="6"
+                         VerticalAlignment="Center"
+                         Fill="{StaticResource Brush.Accent}" />
+
+                <TextBlock Grid.Column="1"
+                           Margin="8,0,0,0"
+                           VerticalAlignment="Center"
+                           Text="运行日志"
+                           FontFamily="{StaticResource FontFamily.Ui}"
+                           FontSize="{StaticResource FontSize.Aux}"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource Brush.LogHead}" />
+
+                <StackPanel Grid.Column="3"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <TextBlock x:Name="LinkCollapse"
+                               Text="收起"
+                               Cursor="Hand"
+                               FontFamily="{StaticResource FontFamily.Ui}"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.LogAct}" />
+                    <TextBlock Text=" · "
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.Muted3}" />
+                    <TextBlock x:Name="LinkCopy"
+                               Text="复制"
+                               Cursor="Hand"
+                               FontFamily="{StaticResource FontFamily.Ui}"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.LogAct}" />
+                    <TextBlock Text=" · "
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.Muted3}" />
+                    <TextBlock x:Name="LinkSave"
+                               Text="保存…"
+                               Cursor="Hand"
+                               FontFamily="{StaticResource FontFamily.Ui}"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.LogAct}" />
+                    <TextBlock Text=" · "
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.Muted3}" />
+                    <TextBlock x:Name="LinkClear"
+                               Text="清空"
+                               Cursor="Hand"
+                               FontFamily="{StaticResource FontFamily.Ui}"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.LogAct}" />
+                </StackPanel>
+            </Grid>
+
+            <!-- ══ 日志正文 ══ -->
+            <RichTextBox x:Name="LogBox"
+                         Grid.Row="1"
+                         Margin="0,0,0,4"
+                         Padding="16,0,10,0"
+                         IsReadOnly="True"
+                         IsDocumentEnabled="False"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         Foreground="{StaticResource Brush.LogFg}"
+                         FontFamily="{StaticResource FontFamily.Mono}"
+                         FontSize="{StaticResource FontSize.Log}"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Disabled"
+                         VerticalContentAlignment="Top"
+                         SelectionBrush="{StaticResource Brush.AccentSoft}"
+                         CaretBrush="Transparent" />
+
+            <!-- ══ 上沿抓手（9px，覆盖在标题行上方） ══ -->
+            <Border x:Name="Grip"
+                    Grid.RowSpan="2"
+                    Height="9"
+                    VerticalAlignment="Top"
+                    Background="Transparent"
+                    Cursor="SizeNS"
+                    Panel.ZIndex="10" />
+        </Grid>
+    </Border>
+</UserControl>

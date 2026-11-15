@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    吸顶分组头：贴在列表卡顶部，随滚动切换成「当前看到的这一组」的标题。
+    不是独立的一层 UI，而是列表 Grid 里的覆盖层（ZIndex 高），所以它不参与滚动。
+-->
+<UserControl x:Class="WingetManagerWpf.Controls.StickyGroupHeader"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:WingetManagerWpf.Controls"
+             xmlns:core="clr-namespace:WingetManagerWpf.Core"
+             Height="40"
+             VerticalAlignment="Top"
+             Visibility="Collapsed"
+             SnapsToDevicePixels="True">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="36" />
+            <RowDefinition Height="4" />
+        </Grid.RowDefinitions>
+
+        <!-- 复用普通分组头的样式，但隐藏批量链接与计数胶囊（BindSticky） -->
+        <controls:GroupHeaderControl x:Name="HeaderView" Grid.Row="0" />
+
+        <!-- 4px 渐变阴影：用一条淡线做出「浮在行上面」的层次，纯色也能读出来 -->
+        <Border Grid.Row="1" Background="{StaticResource Brush.LineSoft}" Opacity="0.9" />
+    </Grid>
+</UserControl>

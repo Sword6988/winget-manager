@@ -1,0 +1,40 @@
+name: build-singlefile
+
+# 没有本地 VS 也能拿到 exe：推到 GitHub 后跑这个工作流，
+# 从 Actions 页面的 Artifacts 里下载 WingetManager-singlefile。
+
+on:
+  push:
+    # wpf-rewrite 是本实现所在的分支（master 是 Python 原版）
+    branches: [main, master, wpf-rewrite]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # 先跑逻辑层自测：427 条断言，退出码非 0 直接让工作流红掉，
+      # 避免带着回归产出 exe。
+      - name: Run self-test
+        shell: cmd
+        run: tests\SelfTest\build-and-run.bat
+
+      - name: Build single-file exe
+        shell: cmd
+        run: build-release.bat
+
+      - name: Show artifact info
+        shell: cmd
+        run: dir dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WingetManager-singlefile
+          path: dist/WingetManager.exe
+          if-no-files-found: error

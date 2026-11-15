@@ -1,0 +1,23 @@
+# ── 构建产物 ──
+bin/
+obj/
+.vs/
+dist/
+tools/build-deps/
+*.nupkg
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ── 运行时数据（便携模式 / 用户目录） ──
+Data/
+WingetManager.portable
+*.log
+
+# ── 临时与备份（不要提交：备份里含真实勾选与包清单） ──
+.tmp-preview/
+dist-Data-backup-*/
+dumps/
+tests/_dump/
+*.tmp

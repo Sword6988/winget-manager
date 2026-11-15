@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    列表行（48 高，v3 从 46 提到 48：整行可点后命中区更大）。
+    整行结构：复选占位 31 → 名称/包 ID 两行 → 标签 → 版本列 110。
+    左侧 16、右侧 14 的内边距与分组头一致，否则勾选框和分组标题会差半个像素。
+-->
+<UserControl x:Class="WingetManagerWpf.Controls.PackageRowControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:WingetManagerWpf.Controls"
+             xmlns:core="clr-namespace:WingetManagerWpf.Core"
+             Height="{x:Static core:Metrics.RowHeight}"
+             Background="Transparent"
+             Focusable="True"
+             FocusVisualStyle="{x:Null}"
+             SnapsToDevicePixels="True">
+
+    <Grid x:Name="RootGrid" Background="Transparent">
+
+        <!-- 勾选态左侧 2px 竖条：扫读时不必逐行找复选框 -->
+        <Border x:Name="SelBar"
+                Width="2"
+                HorizontalAlignment="Left"
+                Background="{StaticResource Brush.Accent}"
+                Visibility="Collapsed" />
+
+        <!-- hover 底色：比整行窄 4px，圆角 9，看起来像一条「浮起的条目」 -->
+        <Border x:Name="HoverBd"
+                Margin="4,1"
+                CornerRadius="{StaticResource Corner.Row}"
+                Background="Transparent" />
+
+        <!-- 键盘焦点描边：只在 Tab/方向键移入时出现，鼠标点击不强加焦点环 -->
+        <Border x:Name="FocusBd"
+                Margin="4,1"
+                CornerRadius="{StaticResource Corner.Row}"
+                BorderBrush="{StaticResource Brush.Accent}"
+                BorderThickness="1"
+                Visibility="Collapsed" />
+
+        <Grid Margin="16,0,14,0">
+            <Grid.ColumnDefinitions>
+                <!-- 31 = 复选 19 + 间距 12（Metrics.CheckBoxPlaceholder）；不可重装行留白占位保持对齐 -->
+                <ColumnDefinition Width="31" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="110" />
+            </Grid.ColumnDefinitions>
+
+            <controls:CheckBoxEx x:Name="Check"
+                                 Grid.Column="0"
+                                 HorizontalAlignment="Left"
+                                 VerticalAlignment="Center" />
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <TextBlock x:Name="NameText"
+                           FontFamily="{StaticResource FontFamily.Ui}"
+                           FontSize="{StaticResource FontSize.Row}"
+                           Foreground="{StaticResource Brush.Text}"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap" />
+                <TextBlock x:Name="IdText"
+                           Margin="0,1,0,0"
+                           FontFamily="{StaticResource FontFamily.Mono}"
+                           FontSize="{StaticResource FontSize.RowId}"
+                           Foreground="{StaticResource Brush.Muted2}"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap" />
+            </StackPanel>
+
+            <StackPanel x:Name="TagPanel"
+                        Grid.Column="2"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center" />
+
+            <TextBlock x:Name="VersionText"
+                       Grid.Column="4"
+                       VerticalAlignment="Center"
+                       TextAlignment="Right"
+                       FontFamily="{StaticResource FontFamily.Ui}"
+                       FontSize="{StaticResource FontSize.RowId}"
+                       Foreground="{StaticResource Brush.Muted}"
+                       TextTrimming="CharacterEllipsis"
+                       TextWrapping="NoWrap" />
+        </Grid>
+
+        <!-- 底部分隔线：与内容同宽，两侧留白避免和卡片圆角撞在一起 -->
+        <Border x:Name="SeparatorBd"
+                Height="1"
+                Margin="16,0,14,0"
+                VerticalAlignment="Bottom"
+                Background="{StaticResource Brush.LineSoft}" />
+    </Grid>
+</UserControl>

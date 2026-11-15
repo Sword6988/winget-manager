@@ -1,0 +1,10 @@
+front;
+wait:900;
+hover:600,700;
+wait:500;
+shot:f1-default;
+clickat:300,208;
+wait:700;
+hover:600,700;
+wait:400;
+shot:f2-rowclick

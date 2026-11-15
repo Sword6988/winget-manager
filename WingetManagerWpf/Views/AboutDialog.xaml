@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    「关于」窗口。展示版本、用途、三个关键路径，并提供「复制诊断信息」（排查时最常要的东西）。
+-->
+<Window x:Class="WingetManagerWpf.Views.AboutDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="560"
+        Height="430"
+        SizeToContent="Manual"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="pack://application:,,,/Assets/app.ico"
+        FontFamily="{StaticResource FontFamily.Ui}"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <!-- 高度策略：SizeToContent=Manual + 430 初值，Loaded 里由 DialogSizer 收到精确高度
+         （无边框透明窗用 SizeToContent=Height 会先显示一帧错误高度再跳，见 DialogSizer 注释） -->
+    <Border x:Name="RootBorder"
+            Margin="18"
+            Background="{StaticResource Brush.Card}"
+            BorderBrush="{StaticResource Brush.Line}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource Corner.Card}"
+            MouseLeftButtonDown="OnDragArea">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="26"
+                              ShadowDepth="8"
+                              Opacity="0.16"
+                              Color="{StaticResource Color.ShadowFx}" />
+        </Border.Effect>
+
+        <Grid Margin="22,18,22,18">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="Winget 软件管家"
+                               FontSize="{StaticResource FontSize.DialogTitle}"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource Brush.Text}" />
+                    <TextBlock x:Name="VersionText"
+                               Margin="0,2,0,0"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.Muted2}" />
+                </StackPanel>
+
+                <Button x:Name="CloseButton"
+                        Grid.Column="1"
+                        Content="✕"
+                        VerticalAlignment="Top"
+                        Style="{StaticResource Button.WindowButton}" />
+            </Grid>
+
+            <TextBlock x:Name="IntroText"
+                       Grid.Row="1"
+                       Margin="0,12,0,0"
+                       TextWrapping="Wrap"
+                       LineHeight="21"
+                       FontSize="{StaticResource FontSize.Body}"
+                       Foreground="{StaticResource Brush.Muted}" />
+
+            <!-- 三个关键路径：排查问题时用户第一个被问到的就是「文件在哪」 -->
+            <Border Grid.Row="2"
+                    Margin="0,14,0,0"
+                    Padding="14,12"
+                    CornerRadius="{StaticResource Corner.Inner}"
+                    Background="{StaticResource Brush.ChipBg}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0"
+                               Grid.Column="0"
+                               Text="导出路径"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.Muted2}" />
+                    <TextBlock x:Name="ExportPathText"
+                               Grid.Row="0"
+                               Grid.Column="1"
+                               Margin="12,0,0,0"
+                               TextTrimming="CharacterEllipsis"
+                               FontFamily="{StaticResource FontFamily.Mono}"
+                               FontSize="{StaticResource FontSize.RowId}"
+                               Foreground="{StaticResource Brush.Text}" />
+
+                    <TextBlock Grid.Row="1"
+                               Grid.Column="0"
+                               Margin="0,8,0,0"
+                               Text="配置文件"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.Muted2}" />
+                    <TextBlock x:Name="SelectionPathText"
+                               Grid.Row="1"
+                               Grid.Column="1"
+                               Margin="12,8,0,0"
+                               TextTrimming="CharacterEllipsis"
+                               FontFamily="{StaticResource FontFamily.Mono}"
+                               FontSize="{StaticResource FontSize.RowId}"
+                               Foreground="{StaticResource Brush.Text}" />
+
+                    <TextBlock Grid.Row="2"
+                               Grid.Column="0"
+                               Margin="0,8,0,0"
+                               Text="运行日志"
+                               FontSize="{StaticResource FontSize.Chip}"
+                               Foreground="{StaticResource Brush.Muted2}" />
+                    <TextBlock x:Name="LogPathText"
+                               Grid.Row="2"
+                               Grid.Column="1"
+                               Margin="12,8,0,0"
+                               TextTrimming="CharacterEllipsis"
+                               FontFamily="{StaticResource FontFamily.Mono}"
+                               FontSize="{StaticResource FontSize.RowId}"
+                               Foreground="{StaticResource Brush.Text}" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3" Margin="0,16,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="CopyHint"
+                           Grid.Column="0"
+                           VerticalAlignment="Center"
+                           FontSize="{StaticResource FontSize.Chip}"
+                           Foreground="{StaticResource Brush.AccentDeep}"
+                           Visibility="Collapsed" />
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="CopyDiagButton" Style="{StaticResource Button.Primary}" />
+                    <Button x:Name="OpenDataDirButton"
+                            Margin="10,0,0,0"
+                            Style="{StaticResource Button.Outline}" />
+                    <Button x:Name="OkButton"
+                            Margin="10,0,0,0"
+                            Style="{StaticResource Button.Outline}" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>
