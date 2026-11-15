@@ -1,8 +1,11 @@
 # ── 行尾策略 ──────────────────────────────────────────────────────────
 # 仓库内统一存 LF，检出时按类型转换。Windows 上 core.autocrlf=true 会为每个
-# 文本文件刷一屏 "LF will be replaced by CRLF" 警告；写死规则后警告消失，
+# 文本文件刷一屏 "LF will be replaced by CRLF" 警告；把 eol 写死之后警告消失，
 # 也让 Linux/macOS 的贡献者不会把 CRLF 提交进来。
-* text=auto
+#
+# 注意 eol=crlf 是**输出端**规则：索引里始终是 LF，只是这份工作区检出成 CRLF。
+# 本项目只有 Windows 目标，所以默认给 CRLF；下面再按类型逐个覆盖。
+* text=auto eol=crlf
 
 # 批处理必须是 CRLF：cmd.exe 解析纯 LF 的 .bat 时，标签跳转和括号块
 # 都可能出现莫名其妙的行为（本项目 tests\ 下的脚本尤其依赖这点）。
