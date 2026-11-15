@@ -8,9 +8,10 @@ name: build-singlefile
 # GITHUB_TOKEN 创建，不需要本地任何凭据。
 #
 # 发一版的完整动作：
-#   git tag -a v2.18.0-wpf -m "标题第一行就是 release 标题"
-#   git push origin v2.18.0-wpf
-#   （说明正文放 docs/releases/<tag>.md，没有则退回 GitHub 自动生成的 release notes）
+#   1. 写 docs/releases/<tag>.md，首行 `# 标题`（标题），其余为正文
+#   2. git tag -a <tag> -m "一句话说明"      # 标签说明给人看，不参与发版
+#   3. git push origin <tag>
+# 同一个 tag 重推是幂等的：旧 release（连同资产）会被删掉重建。
 
 on:
   push:
@@ -60,9 +61,6 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          # 需要 tag 对象本身（附注标签的标题行当 release 标题用）
-          fetch-depth: 0
 
       - name: Download exe
         uses: actions/download-artifact@v4
@@ -79,7 +77,8 @@ jobs:
           mkdir -p out
           cp artifact/WingetManager.exe "out/$asset"
           cd out
-          sha256sum "$asset" > SHA256SUMS.txt
+          # coreutils 对二进制文件输出 "hash *name"，统一成 "hash  name" 更通用
+          sha256sum "$asset" | sed 's/ \*/  /' > SHA256SUMS.txt
           echo "--- 待上传 ---"
           ls -l
           cat SHA256SUMS.txt
@@ -91,14 +90,37 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          title="$(git tag -l --format='%(contents:subject)' "$tag")"
-          [ -n "$title" ] || title="$tag"
           notes="docs/releases/${tag}.md"
+
+          # 标题和正文都从说明文件取。**不要**用 `git tag -l --format=%(contents:subject)`：
+          # actions/checkout 检出 tag 时会把附注标签退化成轻量 ref，`contents`
+          # 于是回落到 commit message，release 标题会变成一句提交信息。
+          title="$tag"
+          body="$RUNNER_TEMP/release-notes.md"
           if [ -f "$notes" ]; then
-            gh release create "$tag" out/* --verify-tag --title "$title" \
-              --notes-file "$notes" --latest=false
+            # 工作区按 .gitattributes 检出成 CRLF，先归一成 LF，
+            # 否则标题会带一个尾随 \r，空行判断也会失灵。
+            norm="$RUNNER_TEMP/notes.lf.md"
+            tr -d '\r' < "$notes" > "$norm"
+            # 约定：文件首行 `# 标题` 即 release 标题，其余为正文
+            title="$(sed -n '1s/^#[[:space:]]*//p' "$norm")"
+            [ -n "$title" ] || title="$tag"
+            awk 'NR==1{next} NR==2 && $0==""{next} {print}' "$norm" > "$body"
           else
             echo "::warning::$notes 不存在，改用自动生成的 release notes"
+            body=""
+          fi
+
+          # 幂等：重推同一个 tag 时先删掉旧 release（保留 tag），否则 create 会报 already exists
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::release $tag 已存在，先删除再重建"
+            gh release delete "$tag" --yes --cleanup-tag=false
+          fi
+
+          if [ -n "$body" ]; then
+            gh release create "$tag" out/* --verify-tag --title "$title" \
+              --notes-file "$body" --latest=false
+          else
             gh release create "$tag" out/* --verify-tag --title "$title" \
               --generate-notes --latest=false
           fi
