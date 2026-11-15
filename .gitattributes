@@ -1,0 +1,25 @@
+# ── 行尾策略 ──────────────────────────────────────────────────────────
+# 仓库内统一存 LF，检出时按类型转换。Windows 上 core.autocrlf=true 会为每个
+# 文本文件刷一屏 "LF will be replaced by CRLF" 警告；写死规则后警告消失，
+# 也让 Linux/macOS 的贡献者不会把 CRLF 提交进来。
+* text=auto
+
+# 批处理必须是 CRLF：cmd.exe 解析纯 LF 的 .bat 时，标签跳转和括号块
+# 都可能出现莫名其妙的行为（本项目 tests\ 下的脚本尤其依赖这点）。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 跨平台脚本保持 LF，避免在 WSL / CI 的 Linux 容器里报 "bad interpreter"
+*.sh      text eol=lf
+*.py      text eol=lf
+*.js      text eol=lf
+*.mermaid text eol=lf
+*.yml     text eol=lf
+
+# ── 二进制：禁止任何行尾/编码转换 ────────────────────────────────────
+*.png  binary
+*.ico  binary
+*.exe  binary
+*.dll  binary
+*.pfx  binary
