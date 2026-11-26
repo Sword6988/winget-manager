@@ -517,11 +517,11 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.RowAlt}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.Line}" />
                             <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.Line}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Brush.Muted3}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

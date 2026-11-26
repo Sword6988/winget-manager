@@ -54,9 +54,12 @@
         </Grid.RowDefinitions>
 
         <!-- ══════════════════ 0. 标题栏 44 ══════════════════ -->
+        <!-- 标题栏 / 命令条 / 状态条与窗口同底色（Brush.Bg）：
+             v4 Win11 语言——整窗一张 mica 浅灰表面，只有内容列表卡浮起为白色，
+             层级靠明度差而不是三条横线卡片拼接 -->
         <Grid x:Name="TitleBar"
               Grid.Row="0"
-              Background="{StaticResource Brush.Card}"
+              Background="{StaticResource Brush.Bg}"
               MouseLeftButtonDown="OnTitleBarMouseDown">
 
             <StackPanel Margin="16,0,0,0"
@@ -145,7 +148,7 @@
         </Grid>
 
         <!-- ══════════════════ 1. 命令条 56 ══════════════════ -->
-        <Grid Grid.Row="1" Background="{StaticResource Brush.Card}">
+        <Grid Grid.Row="1" Background="{StaticResource Brush.Bg}">
             <Grid Margin="16,0,16,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" MinWidth="150" MaxWidth="300" />
@@ -383,7 +386,7 @@
         </Grid>
 
         <!-- ══════════════════ 3. 状态条 32 ══════════════════ -->
-        <Grid Grid.Row="3" Background="{StaticResource Brush.Card}">
+        <Grid Grid.Row="3" Background="{StaticResource Brush.Bg}">
             <Border Height="1" VerticalAlignment="Top" Background="{StaticResource Brush.Line}" />
 
             <Grid Margin="16,0,12,0">

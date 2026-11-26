@@ -94,7 +94,9 @@ namespace WingetManagerWpf.Controls
             Brush brush = Foreground;
             if (brush == null)
             {
-                brush = ThemeLookup.GetBrush(this, "Brush.AccentGradient", SystemColors.ControlTextBrush);
+                // v4 Win11 重设计：大标题改中性深色（accent 只留给主操作按钮），
+                // 类名保留 GradientText（对外 API 与 XAML 引用零变更）
+                brush = ThemeLookup.GetBrush(this, "Brush.Text", SystemColors.ControlTextBrush);
             }
 
             text.SetForegroundBrush(brush);

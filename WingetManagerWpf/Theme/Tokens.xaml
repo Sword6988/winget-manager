@@ -1,12 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    设计令牌（颜色 / 字体 / 字号 / 圆角 / 间距）—— v2「清朗 Azure」重设计。
+    设计令牌（颜色 / 字体 / 字号 / 圆角 / 间距）—— v4「Win11 原生」重设计。
     键名是全局约定：所有控件只许引用这些键，**不得**再写字面色值，
     否则主题一旦调整就会出现「改了令牌但界面没变」的幽灵。
 
-    v2 与原版（qt_common.py 的靛紫玻璃拟态）的差异见 docs/UI-DESIGN.md：
-    · 主色由靛紫 #6366F1→#8B5CF6 改为 Azure 蓝 #2563EB→#0EA5E9（白底对比度 ≥ 4.5:1，可达 WCAG AA）
-    · 中性色整体压深一档（页面底 #F3F5F9、正文 #101828），卡片/页面明度差拉开，层次更清楚
+    v4 与 v3「清朗 Azure」的差异（改造目标：贴近 Win11 原生、克制中性）：
+    · 品牌蓝由 Tailwind 系 #2563EB → Win11 系统蓝 #0067C0（hover #1976C5 / pressed #005BA1）
+    · 中性色脱掉蓝调：页面底 #F3F3F3（mica 浅色）、卡片白、分隔线 #E5E5E5、正文 #1B1B1B
+    · 全部渐变画刷改为实色（键名保留、类型换成 SolidColorBrush）——
+      AccentGradient / AccentGradientHover 被标题、按钮、胶囊、统计卡共用，
+      一处改实色，全应用收敛为「一处 accent、其余中性」
+    · 浮动选择条由深色面改为白色浮层（Win11 浮出面板语言），文字/描边令牌同步反转
+    · 圆角阶 12/9/8/6 → 8/6/4：卡片 8、输入与按钮 4、胶囊保持全圆
+    · 字体 / 字号 / 间距沿用 v3（Segoe UI Variable + 4px 栅格），交互结构零变更
+
+    v3 备注（仍然成立）：
     · 新增 Brush.RowSelected（勾选行底色）与 Brush.FocusRing（键盘焦点环）
     · 新增 Thickness.Page / PageTop / PageGap / Page（紧凑版）响应式页面边距令牌，
       由 MainWindow 在 ActualWidth < 1080 时切换为紧凑值（DynamicResource 引用）
@@ -16,146 +24,133 @@
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
 
     <!-- ══════════════ 颜色（Color，写渐变/动画时要用） ══════════════ -->
-    <Color x:Key="Color.Accent">#FF2563EB</Color>
-    <Color x:Key="Color.AccentDeep">#FF1D4ED8</Color>
-    <Color x:Key="Color.Accent2">#FF0EA5E9</Color>
-    <Color x:Key="Color.Bg">#FFF3F5F9</Color>
+    <Color x:Key="Color.Accent">#FF0067C0</Color>
+    <Color x:Key="Color.AccentDeep">#FF005BA1</Color>
+    <Color x:Key="Color.Accent2">#FF2E7BC4</Color>
+    <Color x:Key="Color.Bg">#FFF3F3F3</Color>
     <!-- 分组头/吸顶头的底色渐变端点（GradientStop.Color 只吃 Color，不吃 Brush） -->
     <Color x:Key="Color.HeadTop">#FFFFFFFF</Color>
-    <Color x:Key="Color.HeadBot">#FFFAFBFE</Color>
+    <Color x:Key="Color.HeadBot">#FFF7F7F7</Color>
     <!-- 阴影色（对话框/工具条 DropShadowEffect 的 Color 属性） -->
-    <Color x:Key="Color.ShadowFx">#FF0F1B33</Color>
+    <Color x:Key="Color.ShadowFx">#FF000000</Color>
     <!-- 键盘焦点环（GradientStop/Effect 只吃 Color 的场合） -->
-    <Color x:Key="Color.FocusRing">#FF93B4FB</Color>
+    <Color x:Key="Color.FocusRing">#FF6BA9DF</Color>
 
     <!-- ══════════════ 基础画刷 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.Bg" Color="#FFF3F5F9" />
+    <SolidColorBrush x:Key="Brush.Bg" Color="#FFF3F3F3" />
     <SolidColorBrush x:Key="Brush.Card" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="Brush.Line" Color="#FFE4E8F0" />
-    <SolidColorBrush x:Key="Brush.LineSoft" Color="#FFEFF1F6" />
-    <SolidColorBrush x:Key="Brush.Text" Color="#FF101828" />
-    <SolidColorBrush x:Key="Brush.Muted" Color="#FF5D6576" />
-    <SolidColorBrush x:Key="Brush.Muted2" Color="#FF98A1B2" />
-    <SolidColorBrush x:Key="Brush.Muted3" Color="#FFC6CCDA" />
+    <SolidColorBrush x:Key="Brush.Line" Color="#FFE5E5E5" />
+    <SolidColorBrush x:Key="Brush.LineSoft" Color="#FFF0F0F0" />
+    <SolidColorBrush x:Key="Brush.Text" Color="#FF1B1B1B" />
+    <SolidColorBrush x:Key="Brush.Muted" Color="#FF5E5E5E" />
+    <SolidColorBrush x:Key="Brush.Muted2" Color="#FF979797" />
+    <SolidColorBrush x:Key="Brush.Muted3" Color="#FFC7C7C7" />
 
     <!-- ══════════════ 品牌色 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.Accent" Color="#FF2563EB" />
-    <SolidColorBrush x:Key="Brush.AccentDeep" Color="#FF1D4ED8" />
-    <SolidColorBrush x:Key="Brush.Accent2" Color="#FF0EA5E9" />
-    <SolidColorBrush x:Key="Brush.AccentSoft" Color="#FFEFF6FF" />
-    <SolidColorBrush x:Key="Brush.AccentLine" Color="#FFBFDBFE" />
-    <LinearGradientBrush x:Key="Brush.AccentGradient" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#FF2563EB" Offset="0" />
-        <GradientStop Color="#FF0EA5E9" Offset="1" />
-    </LinearGradientBrush>
-    <LinearGradientBrush x:Key="Brush.AccentGradientHover" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#FF1D4ED8" Offset="0" />
-        <GradientStop Color="#FF0284C7" Offset="1" />
-    </LinearGradientBrush>
+    <!-- Win11 系统蓝三阶：base / pressed(深) / 亮阶（保留给未来需要两档蓝的场合） -->
+    <SolidColorBrush x:Key="Brush.Accent" Color="#FF0067C0" />
+    <SolidColorBrush x:Key="Brush.AccentDeep" Color="#FF005BA1" />
+    <SolidColorBrush x:Key="Brush.Accent2" Color="#FF2E7BC4" />
+    <SolidColorBrush x:Key="Brush.AccentSoft" Color="#FFE9F1F9" />
+    <SolidColorBrush x:Key="Brush.AccentLine" Color="#FFC6DAEE" />
+    <!-- v4：渐变退役。键名保留（引用方零改动），值换成实色 —— hover 为 Win11 的 +5% 提亮阶 -->
+    <SolidColorBrush x:Key="Brush.AccentGradient" Color="#FF0067C0" />
+    <SolidColorBrush x:Key="Brush.AccentGradientHover" Color="#FF1976C5" />
 
     <!-- ══════════════ 语义色 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.Warn" Color="#FFB45309" />
-    <SolidColorBrush x:Key="Brush.WarnBg" Color="#FFFFF9EB" />
-    <SolidColorBrush x:Key="Brush.WarnLine" Color="#FFF6E7C1" />
-    <SolidColorBrush x:Key="Brush.Err" Color="#FFDC2626" />
+    <SolidColorBrush x:Key="Brush.Warn" Color="#FF9C6B00" />
+    <SolidColorBrush x:Key="Brush.WarnBg" Color="#FFFFF7E2" />
+    <SolidColorBrush x:Key="Brush.WarnLine" Color="#FFF1E3BC" />
+    <SolidColorBrush x:Key="Brush.Err" Color="#FFC42B1C" />
 
     <!-- ══════════════ 行状态 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.RowHover" Color="#FFF4F7FD" />
-    <SolidColorBrush x:Key="Brush.RowAlt" Color="#FFE8ECF5" />
-    <!-- 勾选行底色：v2 新增。勾选不只反映在复选框上，整行淡淡铺一层品牌浅蓝，
+    <SolidColorBrush x:Key="Brush.RowHover" Color="#FFF6F6F6" />
+    <SolidColorBrush x:Key="Brush.RowAlt" Color="#FFF1F1F1" />
+    <!-- 勾选行底色：勾选不只反映在复选框上，整行淡淡铺一层 accent 浅底，
          扫一眼就知道哪些会被导出（可用性改进 #1） -->
-    <SolidColorBrush x:Key="Brush.RowSelected" Color="#FFEDF3FF" />
-    <SolidColorBrush x:Key="Brush.NameOff" Color="#FFA6AEBE" />
-    <SolidColorBrush x:Key="Brush.IdOff" Color="#FFC2C8D5" />
+    <SolidColorBrush x:Key="Brush.RowSelected" Color="#FFE4EEF8" />
+    <SolidColorBrush x:Key="Brush.NameOff" Color="#FF979797" />
+    <SolidColorBrush x:Key="Brush.IdOff" Color="#FFB5B5B5" />
 
     <!-- ══════════════ 键盘焦点 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.FocusRing" Color="#FF93B4FB" />
+    <SolidColorBrush x:Key="Brush.FocusRing" Color="#FF6BA9DF" />
 
     <!-- ══════════════ 标签（来源 / 置灰） ══════════════ -->
-    <SolidColorBrush x:Key="Brush.TagSrcFg" Color="#FF1D4ED8" />
-    <SolidColorBrush x:Key="Brush.TagSrcBg" Color="#FFEFF6FF" />
-    <SolidColorBrush x:Key="Brush.TagSrcLine" Color="#FFDBEAFE" />
-    <SolidColorBrush x:Key="Brush.TagDimFg" Color="#FF98A1B2" />
-    <SolidColorBrush x:Key="Brush.TagDimBg" Color="#FFF2F4F8" />
-    <SolidColorBrush x:Key="Brush.TagDimLine" Color="#FFE7EAF1" />
+    <SolidColorBrush x:Key="Brush.TagSrcFg" Color="#FF005BA1" />
+    <SolidColorBrush x:Key="Brush.TagSrcBg" Color="#FFE9F1F9" />
+    <SolidColorBrush x:Key="Brush.TagSrcLine" Color="#FFC6DAEE" />
+    <SolidColorBrush x:Key="Brush.TagDimFg" Color="#FF979797" />
+    <SolidColorBrush x:Key="Brush.TagDimBg" Color="#FFF4F4F4" />
+    <SolidColorBrush x:Key="Brush.TagDimLine" Color="#FFE9E9E9" />
 
-    <!-- ══════════════ 玻璃拟态（工具条 / 底栏） ══════════════ -->
-    <!-- v2：把透明度从 0.78 提到 0.85 —— 没有实时模糊的「假玻璃」越透越显脏，
-         提高一档更像实心浅卡，边界靠描边表达 -->
-    <SolidColorBrush x:Key="Brush.Glass" Color="#D9FFFFFF" />
-    <SolidColorBrush x:Key="Brush.GlassBorder" Color="#F0E4E8F0" />
-    <SolidColorBrush x:Key="Brush.GlassInput" Color="#F2FFFFFF" />
+    <!-- ══════════════ 容器表面（工具条 / 输入框底） ══════════════ -->
+    <!-- v4：假玻璃全部落成实白，边界靠描边表达（Win11 输入框语言） -->
+    <SolidColorBrush x:Key="Brush.Glass" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="Brush.GlassBorder" Color="#FFE5E5E5" />
+    <SolidColorBrush x:Key="Brush.GlassInput" Color="#FFFFFFFF" />
 
     <!-- ══════════════ 日志面板 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.LogBg" Color="#FFFAFBFE" />
-    <SolidColorBrush x:Key="Brush.LogFg" Color="#FF333B4A" />
-    <SolidColorBrush x:Key="Brush.LogTs" Color="#FFA2AAB9" />
-    <SolidColorBrush x:Key="Brush.LogHead" Color="#FF5D6576" />
-    <SolidColorBrush x:Key="Brush.LogAct" Color="#FF8A93A6" />
-    <SolidColorBrush x:Key="Brush.LogOk" Color="#FF067647" />
-    <SolidColorBrush x:Key="Brush.LogSkip" Color="#FF0E7490" />
-    <SolidColorBrush x:Key="Brush.LogFail" Color="#FFDC2626" />
-    <SolidColorBrush x:Key="Brush.LogDone" Color="#FF1D4ED8" />
+    <SolidColorBrush x:Key="Brush.LogBg" Color="#FFF7F7F7" />
+    <SolidColorBrush x:Key="Brush.LogFg" Color="#FF3B3B3B" />
+    <SolidColorBrush x:Key="Brush.LogTs" Color="#FF9B9B9B" />
+    <SolidColorBrush x:Key="Brush.LogHead" Color="#FF5E5E5E" />
+    <SolidColorBrush x:Key="Brush.LogAct" Color="#FF8A8A8A" />
+    <SolidColorBrush x:Key="Brush.LogOk" Color="#FF0F7B0F" />
+    <SolidColorBrush x:Key="Brush.LogSkip" Color="#FF0E639C" />
+    <SolidColorBrush x:Key="Brush.LogFail" Color="#FFC42B1C" />
+    <SolidColorBrush x:Key="Brush.LogDone" Color="#FF0067C0" />
 
     <!-- ══════════════ 滚动条 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.Scroll" Color="#FFCBD2E1" />
-    <SolidColorBrush x:Key="Brush.ScrollHi" Color="#FFAAB4C9" />
+    <SolidColorBrush x:Key="Brush.Scroll" Color="#FFC8C8C8" />
+    <SolidColorBrush x:Key="Brush.ScrollHi" Color="#FFA6A6A6" />
 
     <!-- ══════════════ 胶囊 / 头部渐变 / 骨架屏 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.ChipBg" Color="#FFEFF1F6" />
+    <SolidColorBrush x:Key="Brush.ChipBg" Color="#FFEFEFEF" />
     <SolidColorBrush x:Key="Brush.HeadTop" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="Brush.HeadBot" Color="#FFFAFBFE" />
-    <SolidColorBrush x:Key="Brush.PillRing" Color="#FFEEF1F7" />
-    <SolidColorBrush x:Key="Brush.PillRingFull" Color="#FFBFD3FE" />
-    <SolidColorBrush x:Key="Brush.GradH1" Color="#FFF9FAFE" />
-    <SolidColorBrush x:Key="Brush.GradH2" Color="#FFEFF2FA" />
-    <SolidColorBrush x:Key="Brush.Skel1" Color="#FFE9ECF4" />
-    <SolidColorBrush x:Key="Brush.Skel2" Color="#FFF0F2F8" />
+    <SolidColorBrush x:Key="Brush.HeadBot" Color="#FFF7F7F7" />
+    <SolidColorBrush x:Key="Brush.PillRing" Color="#FFEDEDED" />
+    <SolidColorBrush x:Key="Brush.PillRingFull" Color="#FF7FB2DE" />
+    <SolidColorBrush x:Key="Brush.GradH1" Color="#FFF9F9F9" />
+    <SolidColorBrush x:Key="Brush.GradH2" Color="#FFF2F2F2" />
+    <SolidColorBrush x:Key="Brush.Skel1" Color="#FFE9E9E9" />
+    <SolidColorBrush x:Key="Brush.Skel2" Color="#FFF2F2F2" />
 
     <!-- ══════════════ 搜索命中高亮 ══════════════ -->
-    <SolidColorBrush x:Key="Brush.HighlightBg" Color="#FFFDE68A" />
-    <SolidColorBrush x:Key="Brush.HighlightFg" Color="#FF7C2D12" />
+    <SolidColorBrush x:Key="Brush.HighlightBg" Color="#FFF6E39A" />
+    <SolidColorBrush x:Key="Brush.HighlightFg" Color="#FF6B5300" />
 
-    <!-- ══════════════ v3「清单工作台」新增 ══════════════ -->
-    <!--
-        实心按钮专用色：**不跟随主题变浅**。
-        深色主题里 Brush.Accent 会提到 #60A5FA（深底上需要更亮的蓝才看得清），
-        但白字压在该色上只有 2.54:1，实心主按钮会糊成一片；
-        所以实心底一律用 600 号色（白字 5.17:1），亮蓝只用于文字/描边。
-    -->
-    <SolidColorBrush x:Key="Brush.BrandSolid" Color="#FF2563EB" />
-    <SolidColorBrush x:Key="Brush.BrandSolidHover" Color="#FF1D4ED8" />
+    <!-- ══════════════ 实心主按钮专用 ══════════════ -->
+    <!-- Win11 accent 按钮三阶：base #0067C0（白字 5.9:1）/ hover +5% 提亮 / pressed 压深。
+         实心底一律用 base，白字对比度达标；亮蓝只用于文字/描边。 -->
+    <SolidColorBrush x:Key="Brush.BrandSolid" Color="#FF0067C0" />
+    <SolidColorBrush x:Key="Brush.BrandSolidHover" Color="#FF1976C5" />
 
-    <!-- 浮动选择条：浅色主题下是深色面（明确「浮层」），深色主题下反转为浅色面 -->
-    <SolidColorBrush x:Key="Brush.Bar" Color="#FF1B2130" />
-    <SolidColorBrush x:Key="Brush.BarText" Color="#FFF4F7FC" />
-    <SolidColorBrush x:Key="Brush.BarText2" Color="#FFA8B2C4" />
-    <SolidColorBrush x:Key="Brush.BarLine" Color="#FF333D4F" />
-    <SolidColorBrush x:Key="Brush.BarHover" Color="#FF2A3346" />
-    <SolidColorBrush x:Key="Brush.BarOnSelected" Color="#FF2A3346" />
+    <!-- 浮动选择条：v4 改为白色浮层（Win11 浮出面板语言），阴影承担「浮」的表达 -->
+    <SolidColorBrush x:Key="Brush.Bar" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="Brush.BarText" Color="#FF1B1B1B" />
+    <SolidColorBrush x:Key="Brush.BarText2" Color="#FF5E5E5E" />
+    <SolidColorBrush x:Key="Brush.BarLine" Color="#FFE5E5E5" />
+    <SolidColorBrush x:Key="Brush.BarHover" Color="#FFF0F0F0" />
+    <SolidColorBrush x:Key="Brush.BarOnSelected" Color="#FFF0F0F0" />
 
     <!--
-        命令条里的分段器轨道与选中底（v3.6 修正）。
-        原来 轨道 #EEF1F7 / 选中底 #FFFFFF / 描边 #E4E8F0 三层都挤在 10–20 的明度差里，
-        125% DPI 下 1px 描边被抗锯齿吃掉一半像素，看起来就是「边框有时候不显示」。
-        现在把轨道压深一档、描边单独加深，拉开三层对比：
-          轨道 → 选中底 22，选中底 → 描边 24，描边 → 轨道 34（原来的 10）。
+        命令条里的分段器轨道与选中底（三层明度差拉开，
+        125% DPI 下 1px 描边不被抗锯齿吃掉）：
+          轨道 #ECECEC → 选中底 #FFFFFF（差 22）→ 描边 #D9D9D9（差 24）
     -->
-    <SolidColorBrush x:Key="Brush.SegTrack" Color="#FFE7EBF3" />
+    <SolidColorBrush x:Key="Brush.SegTrack" Color="#FFECECEC" />
     <SolidColorBrush x:Key="Brush.SegOn" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="Brush.SegOnLine" Color="#FFCBD5E4" />
+    <SolidColorBrush x:Key="Brush.SegOnLine" Color="#FFD9D9D9" />
 
     <!--
-        未勾选复选框的描边（v3.4 修正）。
-        原来用 Brush.Line(#E4E8F0) 压在 Brush.RowAlt(#E8ECF5) 上，两者只差 1.06:1，
-        19px 的框在白卡上几乎消失，用户读不出「这里可以勾」。
-        现在改成白底 + 1.5px #8791A3：对白底 3.18:1，达到 WCAG 1.4.11 对非文本控件的 3:1 门槛。
+        未勾选复选框的描边：白底 + 1.5px #767676（4.5:1，
+        超过 WCAG 1.4.11 对非文本控件的 3:1 门槛）。
     -->
-    <SolidColorBrush x:Key="Brush.CheckLine" Color="#FF8791A3" />
+    <SolidColorBrush x:Key="Brush.CheckLine" Color="#FF767676" />
     <SolidColorBrush x:Key="Brush.CheckFill" Color="#FFFFFFFF" />
 
     <!--
-        列表底部渐隐（v3.4 新增）。卡片高度不是行高整数倍，最后一行必然被下沿切一半，
+        列表底部渐隐。卡片高度不是行高整数倍，最后一行必然被下沿切一半，
         「字被切断」看起来像渲染错误，用 28px 渐变把它收掉。
         透明端是 #00FFFFFF（= Brush.Card 的透明版本），换主题时这一条要跟着改。
     -->
@@ -165,7 +160,7 @@
     </LinearGradientBrush>
 
     <!-- 状态条 / Toast -->
-    <SolidColorBrush x:Key="Brush.ToastOk" Color="#FF4ADE80" />
+    <SolidColorBrush x:Key="Brush.ToastOk" Color="#FF0F7B0F" />
 
     <!-- v3 字号：标题栏收小（44 高的标题栏装不下 24px 标题），状态条压到 11.5 -->
     <sys:Double x:Key="FontSize.Titlebar">13.5</sys:Double>
@@ -173,18 +168,18 @@
     <sys:Double x:Key="FontSize.Status">11.5</sys:Double>
     <sys:Double x:Key="FontSize.Micro">10.5</sys:Double>
 
-    <CornerRadius x:Key="Corner.SelectionBar">12</CornerRadius>
-    <CornerRadius x:Key="Corner.Menu">10</CornerRadius>
+    <CornerRadius x:Key="Corner.SelectionBar">8</CornerRadius>
+    <CornerRadius x:Key="Corner.Menu">8</CornerRadius>
 
     <!-- ══════════════ 字体 ══════════════ -->
-    <!-- 逗号分隔即回退链；v2 把 Segoe UI Variable 提到最前（Win11 自带），
+    <!-- 逗号分隔即回退链；Segoe UI Variable 在最前（Win11 自带），
          西文走 Fluent 原生字形、中文回退雅黑，混排更协调 -->
     <FontFamily x:Key="FontFamily.Ui">Segoe UI Variable Text, Segoe UI, HarmonyOS Sans SC, Microsoft YaHei UI, Microsoft YaHei</FontFamily>
     <FontFamily x:Key="FontFamily.Mono">Cascadia Mono, Consolas, Courier New</FontFamily>
 
     <!--
         ══════════════ 字号 ══════════════
-        v2 重设计不再按「原版 pt 换算」钉值，而是按信息层级重排（详见 docs/UI-DESIGN.md §3）：
+        按信息层级排布（详见 docs/UI-DESIGN.md §3）：
         · 标题/正文加大半级到一级，长会话阅读更省力；ID/标签等辅助信息维持小号
         · 全部取 0.5 的倍数，保证 100%/125%/150% 缩放下不会出现半像素模糊
     -->
@@ -207,13 +202,13 @@
     <sys:Double x:Key="FontSize.Bottom">12.5</sys:Double>
 
     <!-- ══════════════ 圆角 ══════════════ -->
-    <!-- v2 圆角阶：4 / 6 / 8 / 12。收小一号，配 hairline 描边走「清晰卡片」而不是「气球」 -->
-    <CornerRadius x:Key="Corner.Card">12</CornerRadius>
-    <CornerRadius x:Key="Corner.Bar">9</CornerRadius>
-    <CornerRadius x:Key="Corner.Row">8</CornerRadius>
-    <CornerRadius x:Key="Corner.Tag">6</CornerRadius>
+    <!-- v4 圆角阶：8 / 6 / 4（Win11 原生语言：窗口与卡片 8、控件 4、胶囊全圆） -->
+    <CornerRadius x:Key="Corner.Card">8</CornerRadius>
+    <CornerRadius x:Key="Corner.Bar">4</CornerRadius>
+    <CornerRadius x:Key="Corner.Row">4</CornerRadius>
+    <CornerRadius x:Key="Corner.Tag">4</CornerRadius>
     <CornerRadius x:Key="Corner.Pill">15</CornerRadius>
-    <CornerRadius x:Key="Corner.Inner">10</CornerRadius>
+    <CornerRadius x:Key="Corner.Inner">6</CornerRadius>
 
     <!-- ══════════════ 间距（4px 栅格） ══════════════ -->
     <sys:Double x:Key="Space.Page">24</sys:Double>
