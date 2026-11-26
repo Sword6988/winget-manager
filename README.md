@@ -8,7 +8,7 @@
 > 📍 **所在分支**：`wpf-rewrite`。本仓库的 `master` 分支是 Python/PySide 原版，
 > `winui3-rewrite` 是另一条 WinUI 3 重写线；三个实现互不干扰，各自是一棵完整可构建的树。
 
-- 版本：2.18.1（基线对齐原版 `core/version.py` 的 2.18.0，此后 WPF 侧的界面修订在此独立递增）
+- 版本：2.18.2（基线对齐原版 `core/version.py` 的 2.18.0，此后 WPF 侧的界面修订在此独立递增）
 - 界面语言：中文
 - 零 NuGet 依赖：只用 .NET Framework 4.8 自带程序集
 - 不想自己编译？直接下 exe：[**WPF 版发布页**](https://github.com/Sword6988/winget-manager/releases?q=wpf)

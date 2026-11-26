@@ -11,6 +11,6 @@ namespace WingetManagerWpf.Core
         /// 此后 WPF 侧独立递增：第三位只在「界面/交互有可见变化」时才动，
         /// 与发布标签 <c>v2.18.1-wpf</c> 严格一一对应，避免用户看到的版本和下载页对不上。
         /// </summary>
-        public const string Version = "2.18.1";
+        public const string Version = "2.18.2";
     }
 }
